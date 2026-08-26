@@ -23,7 +23,7 @@ def extract_variables(content: str) -> list[str]:
 
 def list_templates() -> list[dict]:
     """
-    사용 가능한 알림톡 템플릿 목록 반환.
+    임시로 사용 가능한 알림톡 템플릿 목록 반환.
     (로컬 디렉토리의 *.template 파일들을 스캔하여 반환)
     """
     templates = []

@@ -7,7 +7,7 @@
    - '2026-08-25' - 5 => '2026-08-20'
    - '25' (일자) - 5 => 2026년 8월 기준 '2026-08-20'
 3. 숫자 사칙연산: {임대료} + {일반관리비}, {납기내금액} * 1.02
-4. 시스템/설정 변수: __system_year__, __system_month__, __config_building_name__, __config_office_phone__
+4. 시스템/설정 변수: __system_year__, __system_month__,__system_day__
 5. 일반 고정 텍스트
 6. 유형별 포맷: amount -> 콤마+내림, name -> 마스킹
 """
@@ -145,10 +145,6 @@ def evaluate_expression(
         evaluated = str(year)
     elif expr == "__system_month__":
         evaluated = str(month)
-    elif expr == "__config_building_name__":
-        evaluated = str(config.get("building_name", ""))
-    elif expr == "__config_office_phone__":
-        evaluated = str(config.get("office_phone", ""))
     elif expr in row_dict:
         # 단일 헤더명 (괄호 없이 헤더명 그대로 들어온 경우 호환)
         val = row_dict[expr]
@@ -190,14 +186,12 @@ def evaluate_expression(
     if evaluated is None:
         def _sub_text(match):
             h = match.group(1).strip()
-            if h == "청구년":
+            if h == "__system_year__":
                 return str(year)
-            if h == "청구월":
+            if h == "__system_month__":
                 return str(month)
-            if h == "오피스텔명":
-                return str(config.get("building_name", ""))
-            if h == "관리소연락처":
-                return str(config.get("office_phone", ""))
+            if h == "__system_day__":
+                return str(now.day)
             val = row_dict.get(h, "")
             return "" if val is None else str(val)
 

@@ -10,7 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel
 
-from app.config import is_configured, save_config, DEFAULT_EXCEL_HEADERS, DEFAULT_TEMPLATE_MAPPING
+from app.config import is_configured
 from app.services import storage, template_service
 
 router = APIRouter()
@@ -19,30 +19,23 @@ router = APIRouter()
 class SetupPayload(BaseModel):
     solapi_key: Optional[str] = ""
     solapi_secret: Optional[str] = ""
-    solapi_sender: Optional[str] = ""
-    template_id: Optional[str] = ""
     sender_phone: Optional[str] = ""
 
 
 @router.post("/setup")
-async def save_setup(payload: SetupPayload, request: Request):
+async def save_setup(payload: SetupPayload):
     data = payload.model_dump()
-
-    # config.json 저장 및 app.state 갱신
-    updated = save_config(data)
-    request.app.state.config = updated
+    storage.save_app_config(data)
     return {"ok": True}
 
 
 @router.get("/api/setup")
-async def get_setup_status(request: Request):
-    config = request.app.state.config or {}
+async def get_setup_status():
+    config = storage.get_app_config()
 
     return {
         "configured": is_configured(config),
-        "solapi_sender": config.get("solapi_sender", ""),
         "sender_phone": config.get("sender_phone", ""),
-        "template_id": config.get("template_id", ""),
         # solapi_key / solapi_secret은 절대 프론트로 내려보내지 않는다.
     }
 
@@ -61,10 +54,10 @@ async def get_template_and_mapping(
     template_info = template_service.load_template_info(target_tid)
 
     db_headers = storage.get_excel_headers(service_id)
-    headers = db_headers if db_headers else DEFAULT_EXCEL_HEADERS
+    headers = db_headers if db_headers else []
 
     db_mapping = storage.get_template_mapping(service_id)
-    mapping = db_mapping if db_mapping else DEFAULT_TEMPLATE_MAPPING
+    mapping = db_mapping if db_mapping else {}
 
     return {
         "template_id": template_info.get("id", "local_default"),

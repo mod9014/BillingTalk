@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from app.models import BillingRow
 from app.routes.upload import get_draft_rows
-from app.services import excel_parser, storage
+from app.services import excel_parser, formula_evaluator, storage, template_service
 from app.services.solapi_client import SolapiError, send_reserved
 
 router = APIRouter()
@@ -31,6 +31,7 @@ class SchedulePayload(BaseModel):
     service_id: Optional[int] = 0
     cycle_key: Optional[str] = None
     force: Optional[bool] = False  # 중복 경고 후 사용자가 강제 등록을 승인한 경우
+    rows: Optional[list[list[str]]] = None  # 테이블에서 직접 편집/수정된 데이터가 전달될 경우 사용
 
 
 def _extract_units_from_draft(raw_rows: list[list[str]], mapping: dict[str, str]) -> list[str]:
@@ -80,8 +81,8 @@ async def check_duplicate_schedule(payload: DuplicateCheckPayload):
 
 
 @router.post("/schedule")
-async def register_schedule(payload: SchedulePayload, request: Request):
-    config = request.app.state.config
+async def register_schedule(payload: SchedulePayload):
+    config = storage.get_app_config()
     service_id = payload.service_id or 0
 
     raw_rows = get_draft_rows(service_id)
@@ -124,26 +125,60 @@ async def register_schedule(payload: SchedulePayload, request: Request):
     else:
         cycle_key, cycle_label = storage.compute_cycle_key(payload.scheduled_date, send_cycle)
 
+    # 템플릿 정보 및 매핑 로드
+    template_id = svc.get("template_id", "local_default") if svc else "local_default"
+    template_info = template_service.load_template_info(template_id)
+    template_vars = template_info.get("variables", [])
+    mapping = storage.get_template_mapping(service_id)
+    mapping_meta = storage.get_mapping_meta(service_id)
+
     # 유효 행 변환
     billing_rows = []
     template_vars_list = []
 
     for r in raw_rows[1:]:
-        row_dict = {headers[i]: r[i] for i in range(min(len(headers), len(r)))}
-        # 연락처 및 호실
-        phone = row_dict.get("연락처", "") or row_dict.get("전화번호", "") or (r[2] if len(r) > 2 else "")
-        unit = row_dict.get("호실", "") or (r[0] if len(r) > 0 else "")
-        tenant = row_dict.get("입주자명", "") or (r[1] if len(r) > 1 else "")
+        row_dict = {headers[i]: (r[i] if i < len(r) else "") for i in range(len(headers))}
+
+        # 1. 수신 연락처 동적 평가 (phone 매핑 수식 적용)
+        phone_expr = mapping.get("phone", "{연락처}")
+        phone_val = formula_evaluator.evaluate_expression(
+            expr=phone_expr,
+            row_dict=row_dict,
+            config=config,
+            year=year,
+            month=month,
+            field_type="phone",
+        )
+        if not phone_val:
+            phone_val = str(row_dict.get("연락처", "") or row_dict.get("전화번호", "") or (r[2] if len(r) > 2 else "")).strip()
+
+        # 2. 식별자 (unit, tenant_name) 유연 추출
+        unit_expr = mapping.get("호실", "{호실}")
+        unit_val = formula_evaluator.evaluate_expression(
+            expr=unit_expr, row_dict=row_dict, config=config, year=year, month=month
+        ) or str(row_dict.get("호실", "") or (r[0] if len(r) > 0 else "")).strip()
+
+        tenant_expr = mapping.get("입주자명", "{입주자명}")
+        tenant_val = formula_evaluator.evaluate_expression(
+            expr=tenant_expr, row_dict=row_dict, config=config, year=year, month=month
+        ) or str(row_dict.get("입주자명", "") or (r[1] if len(r) > 1 else "")).strip()
+
+        # 3. 템플릿 변수(#{변수명}) 동적 평가 생성 (하드코딩 없음)
+        tvars = excel_parser.evaluate_row_template_vars(
+            row_dict=row_dict,
+            mapping=mapping,
+            mapping_meta=mapping_meta,
+            config=config,
+            year=year,
+            month=month,
+            template_vars=template_vars,
+        )
 
         billing_row = BillingRow(
-            unit=str(unit),
-            tenant_name=str(tenant),
-            phone=str(phone),
-            amount_on_time=0,
-            amount_late=0,
-            valid=bool(phone),
+            phone=str(phone_val),
+            unit=str(unit_val),            valid=bool(phone_val),
+            data=row_dict,
         )
-        tvars = excel_parser.map_to_template_vars(billing_row, config, year, month)
         billing_rows.append(billing_row)
         template_vars_list.append(tvars)
 

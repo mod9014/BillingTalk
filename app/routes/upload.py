@@ -30,7 +30,7 @@ class PastePayload(BaseModel):
 async def upload_excel(file: UploadFile = File(...), service_id: int = Query(0)):
     content = await file.read()
     try:
-        rows = excel_parser.parse_excel(content)
+        rows = excel_parser.parse_excel(content, service_id=service_id)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
     except Exception as e:
@@ -47,7 +47,7 @@ async def upload_excel(file: UploadFile = File(...), service_id: int = Query(0))
 async def upload_paste(payload: PastePayload):
     service_id = payload.service_id
     try:
-        rows = excel_parser.parse_pasted_text(payload.text)
+        rows = excel_parser.parse_pasted_text(payload.text, service_id=service_id)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
@@ -65,13 +65,12 @@ async def get_preview(service_id: int = Query(0)):
 
 @router.get("/upload/mapped-preview")
 async def get_mapped_preview(
-    request: Request,
     service_id: int = Query(0),
     year: Optional[int] = Query(0),
     month: Optional[int] = Query(0),
 ):
     """선택된 서비스의 템플릿 변수를 테이블 헤더로 하고 매핑 평가된 셀 값들을 반환."""
-    config = request.app.state.config or {}
+    config = storage.get_app_config()
     raw_rows = _draft_rows_by_service.get(service_id, [])
     if not raw_rows or len(raw_rows) < 2:
         return {"headers": [], "header_vars": [], "rows": [], "total": 0}

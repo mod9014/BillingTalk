@@ -17,13 +17,14 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import is_configured
 from app.routes import schedule, service, setup, status, upload
+from app.services import storage
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 
 
-def create_app(config: dict) -> FastAPI:
-    app = FastAPI(title="오피스텔 청구 알림톡")
-    app.state.config = config
+def create_app(config: dict | None = None) -> FastAPI:
+    app = FastAPI(title="알림톡 발송기")
+    storage.init_db()
 
     app.include_router(setup.router)
     app.include_router(upload.router)
@@ -33,7 +34,7 @@ def create_app(config: dict) -> FastAPI:
 
     @app.get("/")
     async def root():
-        target = "/index.html" if is_configured(app.state.config) else "/setup.html"
+        target = "/index.html" if is_configured() else "/setup.html"
         return RedirectResponse(url=target)
 
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

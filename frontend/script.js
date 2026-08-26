@@ -828,7 +828,7 @@ function updateRecipientSummary() {
   }
 
   const editedCount = Object.keys(mappedDataState.editedMap).length;
-  let text = `총 ${total}건의 발송 대상자가 확인되었습니다. (각 셀을 클릭하여 값을 바로 수정할 수 있습니다)`;
+  let text = `총 ${total}건의 발송 대상자가 확인되었습니다.`;
   if (editedCount > 0) {
     text += ` — ✏️ ${editedCount}개 항목이 직접 수정되었습니다.`;
   }
@@ -1386,7 +1386,7 @@ function setupAutocomplete(wrapper, varKey) {
 }
 
 function buildTypeSelect(varKey, currentType) {
-  const guessedType = currentType || DEFAULT_TYPE_MAP[varKey] || "text";
+  const guessedType = currentType || "text";
   const opts = FIELD_TYPE_OPTIONS.map((o) =>
     `<option value="${o.value}"${o.value === guessedType ? " selected" : ""}>${o.label}</option>`
   ).join("");
@@ -1417,7 +1417,7 @@ function renderMappingTable() {
   function addFixedRow({ varKey, label, hint, defaultExpr, forcedType }) {
     const val = setupState.templateMapping[varKey] || defaultExpr;
     const meta = setupState.mappingMeta[varKey] || {};
-    const type = forcedType || meta.type || DEFAULT_TYPE_MAP[varKey] || "text";
+    const type = forcedType || meta.type || "text";
     const required = meta.required !== false;
 
     const tr = document.createElement("tr");
@@ -1478,7 +1478,7 @@ function renderMappingTable() {
       setupState.templateMapping[`#{${varName}}`] ||
       "";
     const meta = setupState.mappingMeta[varName] || {};
-    const type = meta.type || DEFAULT_TYPE_MAP[varName] || "text";
+    const type = meta.type || "text";
     const required = meta.required !== false;
 
     const tr = document.createElement("tr");
@@ -1661,33 +1661,11 @@ function calculateWordSimilarity(word1, word2) {
   return Math.max(charLev, jamoLev, dice, jamoDice, inclusionScore);
 }
 
-// 키워드 및 동의어/별칭 사전
-const KEYWORD_ALIAS_MAP = {
-  "phone": ["연락처", "전화번호", "휴대폰", "핸드폰", "휴대폰번호", "전화", "phone", "tel", "mobile", "contact", "수신번호", "수신자번호"],
-  "send_date": ["납부기한", "납기일", "납기", "납부마감일", "마감일", "기한", "납부일", "입금기한"],
-  "호실": ["호실", "호수", "호실번호", "동호수", "동호", "호", "room", "unit"],
-  "입주자명": ["입주자명", "입주자", "성명", "이름", "임차인", "임차인명", "고객명", "수신인", "수신자", "계약자", "name"],
-  "임대료": ["임대료", "월세", "차임", "rent"],
-  "일반관리비": ["일반관리비", "관리비", "공용관리비", "공용비"],
-  "주차료": ["주차료", "주차비", "주차요금", "주차"],
-  "기타": ["기타", "기타금액", "기타요금", "잡비", "기타비용"],
-  "전기료": ["전기료", "전기세", "전기요금", "한전", "전기"],
-  "수도료": ["수도료", "수도세", "수도요금", "상하수도", "수도"],
-  "가스료": ["가스료", "가스비", "가스요금", "도시가스"],
-  "TV수신료": ["TV수신료", "tv수신료", "티비수신료", "TV", "티비", "수신료", "tv료"],
-  "전월미납금": ["전월미납금", "미납금", "전월미납", "미납액", "연체료", "미납", "연체금", "미납금액"],
-  "납기내금액": ["납기내금액", "납기내 금액", "청구금액", "당월청구액", "합계", "총금액", "납부금액", "청구합계", "부과금액"],
-  "납기후금액": ["납기후금액", "납기후 금액", "연체후금액", "납기후합계", "연체포함금액"],
-  "총금액": ["총금액", "청구금액", "합계", "총합계", "납기내금액", "청구합계"],
-  "납부기한": ["납부기한", "납기일", "납기", "납부마감일", "마감일", "기한", "납부일", "입금기한"],
-};
-
 // 시스템 설정 및 공통 변수
 const SYSTEM_VARS_MAP = {
   "청구년": "__system_year__",
   "청구월": "__system_month__",
-  "오피스텔명": "__config_building_name__",
-  "관리소연락처": "__config_office_phone__",
+
 };
 
 // 등록된 헤더(setupState.excelHeaders) 중 대상 단어(및 동의어들)와 유사도가 가장 높은 헤더 찾기
@@ -1731,12 +1709,12 @@ function runAutoMapping() {
   if (!Array.isArray(setupState.templateVariables)) setupState.templateVariables = [];
 
   // 1. phone 자동 매핑 (등록된 엑셀 헤더 대상 유사도 매칭)
-  const phoneTargets = KEYWORD_ALIAS_MAP["phone"] || ["phone", "연락처", "전화번호"];
+  const phoneTargets = ["phone", "연락처", "전화번호"];
   const matchedPhone = findBestMatchingHeader(phoneTargets, setupState.excelHeaders, 0.4);
   setupState.templateMapping["phone"] = matchedPhone ? `{${matchedPhone.header}}` : "{연락처}";
 
   // 2. send_date 자동 매핑 (기본: {납부기한} - 5) (등록된 엑셀 헤더 대상 유사도 매칭)
-  const dueTargets = KEYWORD_ALIAS_MAP["send_date"] || ["납부기한", "납기일", "납기", "납부일"];
+  const dueTargets = ["납부기한", "납기일", "납기", "납부일"];
   const matchedDue = findBestMatchingHeader(dueTargets, setupState.excelHeaders, 0.4);
   setupState.templateMapping["send_date"] = matchedDue
     ? `{${matchedDue.header}} - 5`
@@ -1755,11 +1733,6 @@ function runAutoMapping() {
 
     // 4-2. 변수명 및 유의어 목록 수집
     const searchTargets = [varName];
-    if (KEYWORD_ALIAS_MAP[varName]) {
-      KEYWORD_ALIAS_MAP[varName].forEach((alias) => {
-        if (!searchTargets.includes(alias)) searchTargets.push(alias);
-      });
-    }
 
     // 4-3. 등록된 헤더 목록 중 유사도 최적 매칭 검색
     const matched = findBestMatchingHeader(searchTargets, setupState.excelHeaders, 0.4);
@@ -1832,7 +1805,7 @@ async function loadSolapiSenders(selectedPfId = "") {
       });
     }
   } catch (err) {
-    console.error("Solapi 카카오 채널 목록 조회 실패", err);
+    console.error("카카오 채널 목록 조회 실패", err);
   }
 }
 

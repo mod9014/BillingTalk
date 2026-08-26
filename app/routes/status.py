@@ -17,11 +17,10 @@ router = APIRouter()
 
 @router.get("/status")
 async def get_send_status(
-    request: Request,
     service_id: Optional[int] = Query(None),
     cycle_key: Optional[str] = Query(None),
 ):
-    config = request.app.state.config
+    config = storage.get_app_config()
 
     for group_id in storage.get_pending_group_ids(service_id):
         try:

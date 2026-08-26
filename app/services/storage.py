@@ -122,8 +122,67 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             )
         """)
+        # 전역 시스템 설정 테이블 (Solapi 인증키, 대체발송번호 등)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
         # 기존 테이블에 추가 컬럼 마이그레이션
         _migrate_columns(conn)
+
+
+def get_app_config() -> dict[str, str]:
+    """DB에 저장된 전역 설정 조회 (기존 config.json이 있으면 최초 1회 자동 이전)."""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute("SELECT key, value FROM app_config").fetchall()
+        config_dict = {r["key"]: r["value"] for r in rows}
+
+    # 만약 DB 설정이 비어있다면, 기존 파일(config.json)에서 마이그레이션 시도
+    if not config_dict:
+        try:
+            legacy_path = Path.home() / ".officetel-bill" / "config.json"
+            if legacy_path.exists():
+                with open(legacy_path, "r", encoding="utf-8") as f:
+                    legacy = json.load(f)
+                if isinstance(legacy, dict) and legacy:
+                    config_dict = save_app_config(legacy)
+        except Exception:
+            pass
+
+    return config_dict
+
+
+def save_app_config(data: dict) -> dict[str, str]:
+    """전역 설정을 DB에 저장(upsert)하고 최신 설정을 반환한다. 빈 문자열인 비밀번호 등은 기존값 유지."""
+    init_db()
+    current = get_app_config()
+    now = _now()
+
+    # 업데이트할 데이터 병합 (기존값 유지 처리)
+    merged = dict(current)
+    for k, v in data.items():
+        if v is None:
+            continue
+        v_str = str(v).strip()
+        # API Secret 등의 경우 비워두면 기존값 유지
+        if k in ("solapi_key", "solapi_secret") and v_str == "":
+            continue
+        merged[k] = v_str
+
+    with _connect() as conn:
+        for k, v in merged.items():
+            conn.execute(
+                """INSERT INTO app_config (key, value, updated_at)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
+                (k, v, now),
+            )
+
+    return merged
 
 
 def _migrate_columns(conn: sqlite3.Connection) -> None:

@@ -11,41 +11,19 @@ from typing import Optional
 
 @dataclass
 class BillingRow:
-    unit: str
-    tenant_name: str
     phone: str
-    rent: int = 0                 # 임대료
-    general_fee: int = 0          # 일반관리비
-    parking_fee: int = 0          # 주차료
-    etc_fee: int = 0              # 기타
-    electricity_fee: int = 0      # 전기료
-    water_fee: int = 0            # 수도료
-    tv_fee: int = 0                # TV수신료
-    prev_unpaid: int = 0          # 전월미납금
-    amount_on_time: int = 0       # 납기내금액
-    amount_late: int = 0          # 납기후금액 (연체료 2% 적용)
-    due_date: str = ""            # 납부기한
+    unit: str = ""
     valid: bool = True
     errors: "list[str]" = field(default_factory=list)
+    data: "dict" = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
-            "unit": self.unit,
-            "tenant_name": self.tenant_name,
             "phone": self.phone,
-            "rent": self.rent,
-            "general_fee": self.general_fee,
-            "parking_fee": self.parking_fee,
-            "etc_fee": self.etc_fee,
-            "electricity_fee": self.electricity_fee,
-            "water_fee": self.water_fee,
-            "tv_fee": self.tv_fee,
-            "prev_unpaid": self.prev_unpaid,
-            "amount_on_time": self.amount_on_time,
-            "amount_late": self.amount_late,
-            "due_date": self.due_date,
+            "unit": self.unit,
             "valid": self.valid,
             "errors": self.errors,
+            "data": self.data,
         }
 
 

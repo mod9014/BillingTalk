@@ -15,7 +15,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.config import DEFAULT_EXCEL_HEADERS, DEFAULT_TEMPLATE_MAPPING
 from app.services import solapi_client, storage, template_service
 
 router = APIRouter()
@@ -33,18 +32,18 @@ class ServicePayload(BaseModel):
 
 
 @router.get("/api/solapi/senders")
-async def list_solapi_senders(request: Request):
+async def list_solapi_senders():
     """Solapi에 등록된 카카오 채널(발신 프로필 pfId) 목록 조회."""
-    config = request.app.state.config or {}
+    config = storage.get_app_config()
     senders = solapi_client.list_plus_friends(config)
     return {"senders": senders}
 
 
 @router.get("/api/templates")
-async def list_templates(request: Request, pf_id: Optional[str] = ""):
+async def list_templates(pf_id: Optional[str] = ""):
     """사용 가능한 템플릿 목록 반환 (로컬 템플릿 + pf_id가 주어진 경우 Solapi 템플릿 포함)."""
     templates = template_service.list_templates()
-    config = request.app.state.config or {}
+    config = storage.get_app_config()
 
     # pf_id가 있으면 Solapi 템플릿도 가져와 합산
     if pf_id and config.get("solapi_key"):
@@ -80,8 +79,8 @@ async def import_service_json(payload: dict):
     send_cycle = str(payload.get("send_cycle", "monthly")).strip()
     pf_id = str(payload.get("pf_id", "")).strip()
     template_id = str(payload.get("template_id", "local_default")).strip() or "local_default"
-    excel_headers = payload.get("excel_headers") or DEFAULT_EXCEL_HEADERS
-    template_mapping = payload.get("template_mapping") or DEFAULT_TEMPLATE_MAPPING
+    excel_headers = payload.get("excel_headers") or []
+    template_mapping = payload.get("template_mapping") or {}
     mapping_meta = payload.get("mapping_meta") or {}
 
     service_id = storage.create_service(
@@ -114,11 +113,11 @@ async def create_service(payload: ServicePayload):
     )
 
     # 엑셀 헤더 저장
-    headers = payload.excel_headers if payload.excel_headers else DEFAULT_EXCEL_HEADERS
+    headers = payload.excel_headers if payload.excel_headers else []
     storage.save_excel_headers(headers, service_id)
 
     # 템플릿 매핑 + 메타 저장
-    mapping = payload.template_mapping if payload.template_mapping else DEFAULT_TEMPLATE_MAPPING
+    mapping = payload.template_mapping if payload.template_mapping else {}
     storage.save_template_mapping(mapping, service_id, payload.mapping_meta)
 
     return {"ok": True, "service_id": service_id}
@@ -143,8 +142,8 @@ async def export_service_json(service_id: int):
         "send_cycle": svc.get("send_cycle", "monthly"),
         "pf_id": svc.get("pf_id", ""),
         "template_id": svc.get("template_id", "local_default"),
-        "excel_headers": headers if headers else DEFAULT_EXCEL_HEADERS,
-        "template_mapping": mapping if mapping else DEFAULT_TEMPLATE_MAPPING,
+        "excel_headers": headers or [],
+        "template_mapping": mapping or {},
         "mapping_meta": mapping_meta or {},
     }
     return export_data
@@ -168,9 +167,9 @@ async def get_service(service_id: int):
 
     return {
         **svc,
-        "excel_headers": headers if headers else DEFAULT_EXCEL_HEADERS,
-        "template_mapping": mapping if mapping else DEFAULT_TEMPLATE_MAPPING,
-        "mapping_meta": mapping_meta,
+        "excel_headers": headers or [],
+        "template_mapping": mapping or {},
+        "mapping_meta": mapping_meta or {},
         "template_id": template_id,
         "template_content": template_info.get("content", ""),
         "template_variables": template_info.get("variables", []),
