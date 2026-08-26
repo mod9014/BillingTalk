@@ -1,0 +1,78 @@
+"""
+전역 설정(Solapi 연동 정보, 건물 기본 정보) 및 템플릿 조회 라우트.
+
+GET  /api/setup    — 현재 설정 여부/값 조회 (민감정보 제외)
+POST /setup        — 전역 설정 저장 (config.json)
+GET  /api/template — ailmtalk.template 원문, 추출 변수 목록, 서비스별 헤더/매핑 조회
+"""
+
+from typing import Optional
+from fastapi import APIRouter, Query, Request
+from pydantic import BaseModel
+
+from app.config import is_configured, save_config, DEFAULT_EXCEL_HEADERS, DEFAULT_TEMPLATE_MAPPING
+from app.services import storage, template_service
+
+router = APIRouter()
+
+
+class SetupPayload(BaseModel):
+    solapi_key: Optional[str] = ""
+    solapi_secret: Optional[str] = ""
+    solapi_sender: Optional[str] = ""
+    template_id: Optional[str] = ""
+    sender_phone: Optional[str] = ""
+
+
+@router.post("/setup")
+async def save_setup(payload: SetupPayload, request: Request):
+    data = payload.model_dump()
+
+    # config.json 저장 및 app.state 갱신
+    updated = save_config(data)
+    request.app.state.config = updated
+    return {"ok": True}
+
+
+@router.get("/api/setup")
+async def get_setup_status(request: Request):
+    config = request.app.state.config or {}
+
+    return {
+        "configured": is_configured(config),
+        "solapi_sender": config.get("solapi_sender", ""),
+        "sender_phone": config.get("sender_phone", ""),
+        "template_id": config.get("template_id", ""),
+        # solapi_key / solapi_secret은 절대 프론트로 내려보내지 않는다.
+    }
+
+
+@router.get("/api/template")
+async def get_template_and_mapping(
+    service_id: int = Query(0),
+    template_id: Optional[str] = Query(None),
+):
+    target_tid = template_id
+    if not target_tid and service_id:
+        svc = storage.get_service(service_id)
+        if svc:
+            target_tid = svc.get("template_id")
+
+    template_info = template_service.load_template_info(target_tid)
+
+    db_headers = storage.get_excel_headers(service_id)
+    headers = db_headers if db_headers else DEFAULT_EXCEL_HEADERS
+
+    db_mapping = storage.get_template_mapping(service_id)
+    mapping = db_mapping if db_mapping else DEFAULT_TEMPLATE_MAPPING
+
+    return {
+        "template_id": template_info.get("id", "local_default"),
+        "template_name": template_info.get("name", ""),
+        "content": template_info.get("content", ""),
+        "variables": template_info.get("variables", []),
+        "error": template_info.get("error"),
+        "excel_headers": headers,
+        "template_mapping": mapping,
+    }
+

@@ -1,0 +1,15 @@
+# 개인정보/시크릿 — 절대 커밋 금지
+config.json
+*.db
+*.sqlite3
+*.template
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# PyInstaller
+build/
+dist/
+*.spec

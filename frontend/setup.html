@@ -1,0 +1,68 @@
+<!-- 전역 설정 화면: Solapi 연동 정보 -->
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>설정 · 임대료/관리비 알림톡 발송기</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <!-- 상단바 -->
+  <header class="top-navbar">
+    <div class="navbar-container">
+      <a href="index.html" class="navbar-brand">
+        <div class="navbar-brand-icon">⚙</div>
+        <div class="navbar-brand-text">
+          <span class="navbar-brand-title">시스템 설정</span>
+          <span class="navbar-brand-sub">Solapi 연동 정보</span>
+        </div>
+      </a>
+      <div class="navbar-actions">
+        <a href="index.html" class="btn btn-secondary btn-sm">← 대시보드로 돌아가기</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-shell" style="max-width: 800px;">
+
+    <form id="setup-form">
+
+      <!-- 1. Solapi 연동 정보 -->
+      <section class="card" id="solapi-section">
+        <h2>Solapi 연동 정보</h2>
+        <p class="card-desc">발송에 필요한 Solapi API 연동 정보를 입력하세요.</p>
+
+        <div class="form-row">
+          <label for="solapi-key">API Key</label>
+          <input type="text" id="solapi-key" name="solapi_key" autocomplete="off"
+            placeholder="Solapi API Key (이미 등록된 경우 비워두면 기존값 유지)">
+        </div>
+
+        <div class="form-row">
+          <label for="solapi-secret">API Secret</label>
+          <input type="password" id="solapi-secret" name="solapi_secret" autocomplete="off"
+            placeholder="Solapi API Secret (이미 등록된 경우 비워두면 기존값 유지)">
+        </div>
+
+        <div class="form-row">
+          <label for="sender-phone">발신번호 (SMS 대체 발송용)</label>
+          <input type="text" id="sender-phone" name="sender_phone" placeholder="예: 0212345678">
+        </div>
+      </section>
+
+      <div class="form-actions" style="margin-bottom: 40px;">
+        <button type="submit" class="btn btn-primary" id="setup-save-btn"
+          style="padding: 12px 28px; font-size: 15px;">설정 저장하기</button>
+      </div>
+      <p class="notice" id="setup-result" style="display: none;"></p>
+    </form>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>

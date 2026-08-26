@@ -1,0 +1,181 @@
+<!-- 서비스 생성/수정 화면: 서비스명, 설명, 엑셀 헤더 설정, 알림톡 템플릿 변수 매핑 -->
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>서비스 설정 · 임대료/관리비 알림톡 발송기</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+  <!-- 상단바 -->
+  <header class="top-navbar">
+    <div class="navbar-container">
+      <a href="index.html" class="navbar-brand">
+        <div class="navbar-brand-icon">📋</div>
+        <div class="navbar-brand-text">
+          <span class="navbar-brand-title" id="page-title">새 서비스 생성</span>
+          <span class="navbar-brand-sub">엑셀 헤더 컬럼 및 템플릿 변수 매핑</span>
+        </div>
+      </a>
+      <div class="navbar-actions">
+        <input type="file" id="import-json-file" accept=".json,application/json" style="display: none;">
+        <button type="button" class="btn btn-secondary btn-sm" id="import-json-btn">가져오기</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="export-json-btn">내보내기</button>
+        <a href="index.html" class="btn btn-secondary btn-sm">← 대시보드로 돌아가기</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-shell" style="max-width: 800px;">
+
+    <form id="service-edit-form">
+
+      <!-- 0. 서비스 기본 정보 -->
+      <section class="card" id="service-info-section">
+        <h2>서비스 정보</h2>
+
+        <div class="form-row">
+          <label for="service-name">서비스 이름 <span style="color: var(--danger);">*</span></label>
+          <input type="text" id="service-name" name="service_name" placeholder="예: 드림 오피스텔 관리비 청구서" required>
+        </div>
+
+        <div class="form-row">
+          <label for="service-desc">서비스 설명</label>
+          <input type="text" id="service-desc" name="service_desc" placeholder="예: 월간 정기 관리비 청구용">
+        </div>
+
+        <div class="form-row">
+          <label for="send-cycle">발송 주기 <span style="color: var(--danger);">*</span></label>
+          <select id="send-cycle" name="send_cycle"
+            style="width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--surface); color: var(--text);">
+            <option value="daily">일간 (매일 발송)</option>
+            <option value="weekly">주간 (매주 발송)</option>
+            <option value="monthly" selected>월간 (매월 1회 정기 발송 - 기본값)</option>
+            <option value="quarterly">분기 (3개월 단위 1~4분기 발송)</option>
+            <option value="half_yearly">반기 (6개월 단위 상/하반기 발송)</option>
+            <option value="yearly">연간 (연 1회 정기 발송)</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- 1. 엑셀 헤더 컬럼 설정 -->
+      <section class="card" id="excel-headers-section">
+        <div class="card-header-row">
+          <div>
+            <h2>엑셀 헤더 컬럼 등록</h2>
+            <p class="card-desc">업로드 및 붙여넣기 시 사용할 엑셀의 헤더 컬럼 목록을 관리합니다.</p>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="reset-default-headers-btn">기본값 복원</button>
+        </div>
+
+        <div class="form-row">
+          <label for="bulk-headers-input">컬럼 일괄 입력</label>
+          <textarea id="bulk-headers-input" rows="2" placeholder="예: 입주자명, 연락처, ...  (엑셀 복사-붙여넣기 가능)"></textarea>
+          <div style="margin-top: 6px;" class="btn-group">
+            <button type="button" class="btn btn-secondary btn-sm" id="apply-bulk-headers-btn">추가/반영</button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>현재 등록된 엑셀 컬럼 목록 (<span id="header-count">0</span>개)</label>
+          <div class="tag-container" id="header-tags-container">
+            <!-- script.js에서 렌더링 -->
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. 알림톡 발신 프로필 및 템플릿 매핑 -->
+      <section class="card" id="template-mapping-section">
+        <div class="card-header-row">
+          <div>
+            <h2>알림톡 발신 프로필 및 템플릿 매핑</h2>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" id="auto-map-btn">⚡ 이름 기반 자동 매핑</button>
+        </div>
+
+        <div class="form-row">
+          <label for="pf-id">발신 프로필 (pfId)</label>
+          <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+            <select id="pf-id-select"
+              style="flex: 1; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--surface); color: var(--text);">
+              <option value="">-- Solapi 등록 채널 선택 또는 직접 입력 --</option>
+            </select>
+          </div>
+          <input type="text" id="pf-id" name="pf_id" placeholder="카카오 채널 발신 프로필 ID (예: @내채널 또는 KA01PF...)">
+        </div>
+
+        <div class="form-row">
+          <label for="template-select">알림톡 템플릿 선택 <span style="color: var(--danger);">*</span></label>
+          <select id="template-select" name="template_id"
+            style="width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--surface); color: var(--text);">
+            <option value="local_default">기본 관리비 청구서 (로컬 ailmtalk.template)</option>
+          </select>
+          <div style="margin-top: 6px;">
+            <input type="text" id="custom-template-id" placeholder="직접 입력할 템플릿 ID (필요 시)">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <label>알림톡 템플릿 원문 미리보기</label>
+          <div class="template-preview-box" id="template-preview-content">템플릿을 불러오는 중...</div>
+        </div>
+
+        <div class="form-row">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <label style="margin-bottom: 0;">변수 ↔ 엑셀 헤더 매핑 테이블</label>
+          </div>
+          <div class="table-wrap">
+            <table class="mapping-table" id="mapping-table">
+              <thead>
+                <tr>
+                  <th style="width: 22%;">템플릿 변수 / 항목</th>
+                  <th style="width: 36%;">
+                    <div style="display: flex; align-items: center; gap: 5px;">
+                      <span>엑셀 컬럼</span>
+                      <span class="header-tooltip-trigger" tabindex="0">
+                        ?
+                        <span class="header-tooltip-popup">
+                          <strong style="display: block; font-size: 12.5px; color: #38bdf8; margin-bottom: 6px;">💡 엑셀
+                            컬럼 / 수식 입력 가이드</strong>
+                          알림톡 템플릿 변수<code>#{변수명}</code> 와 대응할 엑셀 템플릿의 헤더를 <code>{변수명}</code> 형식으로 입력<br><br>
+                          • <strong>사칙 연산 수식</strong>:
+                          <code>{날짜} - 5</code> (예: 납부기한 5일 전 발송일 계산)<br>
+                          <code>{합계} + {미납금}</code>, <code>{금액} * 1.02</code><br>
+                          • <strong>고정값/설정값</strong>: 중괄호 없이 직접 입력 (예: <code>09:00</code>, <code>관리사무소</code>)<br>
+                          • <strong>시스템 변수</strong>: <code>__system_year__</code>(청구년),
+                          <code>__system_month__</code>(청구월)
+                        </span>
+                      </span>
+                    </div>
+                  </th>
+                  <th style="width: 14%; text-align: center;">유형</th>
+                  <th style="width: 13%; text-align: center;">필수</th>
+                  <th style="width: 15%;">기본값</th>
+                </tr>
+              </thead>
+              <tbody id="mapping-table-body">
+                <!-- script.js에서 동적 생성 -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <div class="form-actions" style="margin-bottom: 40px; display: flex; justify-content: space-between;">
+        <button type="submit" class="btn btn-primary" id="service-save-btn"
+          style="padding: 12px 28px; font-size: 15px;">서비스 저장하기</button>
+        <button type="button" class="btn btn-secondary" id="service-delete-btn"
+          style="background-color: var(--danger); padding: 12px 20px; font-size: 15px; display: none;">🗑 삭제</button>
+      </div>
+      <p class="notice" id="service-edit-result" style="display: none;"></p>
+    </form>
+
+  </div>
+
+  <script src="script.js"></script>
+</body>
+
+</html>
