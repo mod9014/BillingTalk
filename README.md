@@ -16,21 +16,18 @@
 
 | 항목 | 설명 |
 |------|------|
-| **Python 3.11+** | [python.org](https://python.org) 에서 설치 |
 | **Solapi 계정** | [solapi.com](https://solapi.com) 회원가입 후 API 키 발급 |
 | **카카오 알림톡 채널** | Solapi에 카카오 비즈니스 채널(발신 프로필) 등록 및 알림톡 템플릿 **검수 완료** 필요 |
 
-### 2. 설치 및 실행
+### 2. 다운로드 및 실행
 
-```bash
-# 의존성 설치
-pip install -r requirements.txt
+1. 우측 **[Releases](../../releases/latest)** 패널 또는 상단 `Releases` 링크에서 최신 버전의 `BillingTalk.exe` 를 다운로드합니다.
+2. 원하는 폴더에 파일을 놓고 **더블클릭**하면 바로 실행됩니다.
+   - exe - 단일 실행파일로 설치가 필요 없습니다.
+   - zip - 압축을 풀고 실행하세요.
+3. 실행 후 브라우저에서 자동으로 대시보드가 열립니다.
 
-# 프로그램 실행
-python main.py
-```
-
-실행 후 브라우저에서 자동으로 `http://127.0.0.1:5050` 이 열립니다.
+> **Windows SmartScreen 경고**가 뜨면 **[추가 정보] → [실행]** 을 클릭하세요.
 
 ---
 
