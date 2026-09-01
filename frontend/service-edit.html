@@ -104,24 +104,19 @@
               <option value="">-- Solapi 등록 채널 선택 또는 직접 입력 --</option>
             </select>
           </div>
-          <input type="text" id="pf-id" name="pf_id" placeholder="카카오 채널 발신 프로필 ID (예: @내채널 또는 KA01PF...)">
         </div>
 
         <div class="form-row">
           <label for="template-select">알림톡 템플릿 선택 <span style="color: var(--danger);">*</span></label>
           <select id="template-select" name="template_id"
             style="width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: var(--surface); color: var(--text);">
-            <option value="local_default">기본 관리비 청구서 (로컬 ailmtalk.template)</option>
+            <option value="">-- 카카오 채널(pfId) 선택 후 템플릿을 선택하세요 --</option>
           </select>
           <div style="margin-top: 6px;">
             <input type="text" id="custom-template-id" placeholder="직접 입력할 템플릿 ID (필요 시)">
           </div>
         </div>
 
-        <div class="form-row">
-          <label>알림톡 템플릿 원문 미리보기</label>
-          <div class="template-preview-box" id="template-preview-content">템플릿을 불러오는 중...</div>
-        </div>
 
         <div class="form-row">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -175,6 +170,98 @@
 
   </div>
 
+  <!-- ========================================================================= -->
+  <!-- 화면 우하단 고정 (Fixed) 스마트폰 알림톡 실시간 미리보기 위젯 -->
+  <!-- ========================================================================= -->
+  <div class="phone-fixed-widget-container" id="phone-fixed-widget-container">
+
+    <!-- 1. 접혔을 때 표시되는 플로팅 버튼 -->
+    <button type="button" class="phone-float-btn" id="phone-preview-float-btn" style="display: none;"
+      title="알림톡 실시간 미리보기 열기">
+      <span class="phone-float-icon">📱</span>
+      <span class="phone-float-text" id="phone-float-btn-text">알림톡 미리보기</span>
+      <span class="phone-float-arrow">▲</span>
+    </button>
+
+    <!-- 2. 펼쳐진 상태의 스마트폰 미리보기 카드 패널 -->
+    <div class="phone-fixed-panel" id="phone-preview-fixed-panel">
+      <div class="phone-preview-card">
+        <!-- 상단 헤더 & 컨트롤 -->
+        <div class="phone-preview-header">
+          <div class="phone-preview-title">
+            <span class="phone-icon">📱</span>
+            <span>알림톡 템플릿 미리보기</span>
+          </div>
+          <div class="phone-header-actions">
+            <button type="button" class="phone-panel-btn" id="phone-preview-toggle-btn" title="최소화">−</button>
+          </div>
+        </div>
+
+        <!-- 스마트폰 디바이스 프레임 목업 -->
+        <div class="phone-mockup">
+          <!-- 상단 스피커 & 카메라 -->
+          <div class="phone-notch">
+            <div class="phone-speaker"></div>
+            <div class="phone-camera"></div>
+          </div>
+
+          <!-- 스마트폰 스크린 -->
+          <div class="phone-screen">
+            <!-- 카카오톡 상단 헤더 (어두운 갈색) -->
+            <div class="kakao-chat-header">
+              <span class="kakao-header-back">‹</span>
+              <div class="kakao-header-info">
+                <div class="kakao-sender-avatar">🏢</div>
+                <div class="kakao-sender-text">
+                  <span class="kakao-sender-name" id="phone-sender-name">알림톡 (카카오 채널)</span>
+                  <span class="kakao-sender-sub">✔ 알림톡 인증채널</span>
+                </div>
+              </div>
+              <span class="kakao-header-menu">⋮</span>
+            </div>
+
+            <!-- 카카오톡 채팅 본문 -->
+            <div class="kakao-chat-body">
+              <div class="kakao-date-divider" id="phone-chat-date">오늘</div>
+
+              <!-- 발신자 아바타 + 말풍선 레이아웃 -->
+              <div class="kakao-message-row">
+                <!-- 프로필 아이콘 (채팅방 좌측) -->
+                <div class="kakao-msg-avatar">🏢</div>
+
+                <!-- 이름 + 카드 -->
+                <div class="kakao-msg-body">
+                  <span class="kakao-msg-sender" id="phone-sender-name-chat">카카오 채널</span>
+
+                  <!-- 알림톡 카드 말풍선 -->
+                  <div class="kakao-alimtalk-card">
+                    <!-- 상단 노란 뱃지 바 -->
+                    <div class="kakao-card-top">
+                      <div class="kakao-card-badge">
+                        <span class="kakao-card-badge-label">알림톡</span>
+                      </div>
+                      <span class="kakao-template-title" id="phone-template-name">청구서 고지</span>
+                    </div>
+
+                    <!-- 템플릿 메시지 본문 -->
+                    <div class="kakao-card-content" id="phone-card-message">템플릿을 선택해주세요.</div>
+                  </div>
+                </div>
+
+                <!-- 말풍선 우측 시간 표시 -->
+                <div class="kakao-msg-time" id="phone-msg-time">오후 9:00</div>
+              </div>
+
+            </div>
+          </div>
+        </div><!-- /phone-mockup -->
+
+      </div><!-- /phone-preview-card -->
+    </div><!-- /phone-fixed-panel -->
+
+  </div><!-- /phone-fixed-widget-container -->
+
+  <script src="preview-phone.js"></script>
   <script src="script.js"></script>
 </body>
 

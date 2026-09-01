@@ -77,16 +77,17 @@ async def get_mapped_preview(
 
     # 서비스 정보 및 템플릿 로드
     svc = storage.get_service(service_id)
-    template_id = svc.get("template_id", "local_default") if svc else "local_default"
-    template_info = template_service.load_template_info(template_id)
+    template_id = svc.get("template_id", "") if svc else ""
+    template_info = template_service.load_template_info(template_id, config)
     template_vars = template_info.get("variables", [])
+
     mapping = storage.get_template_mapping(service_id)
     mapping_meta = storage.get_mapping_meta(service_id)  # { varKey: {type, required, defaultValue} }
 
     # 1. 테이블 헤더 정의
-    # 발송 예정일 + 필수 수신 연락처 + 템플릿 변수들
-    header_vars = ["send_date", "phone"] + [v for v in template_vars if v not in ("phone", "send_date")]
-    display_headers = ["발송일", "수신 연락처"] + [f"#{v}" for v in template_vars if v not in ("phone", "send_date")]
+    # 발송 예정일 + 발송 예정 시간 + 필수 수신 연락처 + 템플릿 변수들
+    header_vars = ["send_date", "send_time", "phone"] + [v for v in template_vars if v not in ("phone", "send_date", "send_time")]
+    display_headers = ["발송일", "발송시간", "수신 연락처"] + [f"#{v}" for v in template_vars if v not in ("phone", "send_date", "send_time")]
 
     # 2. 엑셀 원본 헤더 인덱싱
     raw_headers = [str(h).strip() for h in raw_rows[0]]
@@ -102,13 +103,15 @@ async def get_mapped_preview(
                 # 기본 추정
                 if var_name == "send_date":
                     expr = mapping.get("발송일", "{납부기한} - 5")
+                elif var_name == "send_time":
+                    expr = mapping.get("발송시간", "09:00")
                 elif var_name == "phone":
                     expr = mapping.get("연락처", "{연락처}")
                 else:
                     expr = f"{{{var_name}}}"
 
             meta = mapping_meta.get(var_name, {})
-            field_type = meta.get("type", "date" if var_name == "send_date" else "text")
+            field_type = meta.get("type", "date" if var_name == "send_date" else ("time" if var_name == "send_time" else "text"))
 
             val = formula_evaluator.evaluate_expression(
                 expr=expr,

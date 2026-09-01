@@ -28,6 +28,7 @@ class DuplicateCheckPayload(BaseModel):
 
 class SchedulePayload(BaseModel):
     scheduled_date: str  # "YYYY-MM-DD"
+    scheduled_time: Optional[str] = None  # "HH:MM"
     service_id: Optional[int] = 0
     cycle_key: Optional[str] = None
     force: Optional[bool] = False  # 중복 경고 후 사용자가 강제 등록을 승인한 경우
@@ -103,8 +104,8 @@ async def register_schedule(payload: SchedulePayload):
     mapping = storage.get_template_mapping(service_id)
     headers = [str(h).strip() for h in raw_rows[0]]
 
-    # 발송 예정 시간 (기본 09:00)
-    send_time_val = str(mapping.get("send_time", "09:00")).strip()
+    # 발송 예정 시간 (payload 우선, 없으면 mapping 설정값, 기본 09:00)
+    send_time_val = str(payload.scheduled_time or mapping.get("send_time", "09:00")).strip()
     if ":" in send_time_val:
         parts = send_time_val.split(":")
         hh = parts[0].strip().zfill(2)
@@ -126,9 +127,10 @@ async def register_schedule(payload: SchedulePayload):
         cycle_key, cycle_label = storage.compute_cycle_key(payload.scheduled_date, send_cycle)
 
     # 템플릿 정보 및 매핑 로드
-    template_id = svc.get("template_id", "local_default") if svc else "local_default"
-    template_info = template_service.load_template_info(template_id)
+    template_id = svc.get("template_id", "") if svc else ""
+    template_info = template_service.load_template_info(template_id, config)
     template_vars = template_info.get("variables", [])
+
     mapping = storage.get_template_mapping(service_id)
     mapping_meta = storage.get_mapping_meta(service_id)
 
@@ -149,8 +151,6 @@ async def register_schedule(payload: SchedulePayload):
             month=month,
             field_type="phone",
         )
-        if not phone_val:
-            phone_val = str(row_dict.get("연락처", "") or row_dict.get("전화번호", "") or (r[2] if len(r) > 2 else "")).strip()
 
         # 2. 식별자 (unit, tenant_name) 유연 추출
         unit_expr = mapping.get("호실", "{호실}")
@@ -158,12 +158,12 @@ async def register_schedule(payload: SchedulePayload):
             expr=unit_expr, row_dict=row_dict, config=config, year=year, month=month
         ) or str(row_dict.get("호실", "") or (r[0] if len(r) > 0 else "")).strip()
 
-        tenant_expr = mapping.get("입주자명", "{입주자명}")
+        tenant_key = next((k for k, v in mapping_meta.items() if v.get("type") == "name"))
+        tenant_expr = mapping.get(tenant_key, "{입주자명}")
         tenant_val = formula_evaluator.evaluate_expression(
             expr=tenant_expr, row_dict=row_dict, config=config, year=year, month=month
-        ) or str(row_dict.get("입주자명", "") or (r[1] if len(r) > 1 else "")).strip()
+        )
 
-        # 3. 템플릿 변수(#{변수명}) 동적 평가 생성 (하드코딩 없음)
         tvars = excel_parser.evaluate_row_template_vars(
             row_dict=row_dict,
             mapping=mapping,
@@ -176,7 +176,9 @@ async def register_schedule(payload: SchedulePayload):
 
         billing_row = BillingRow(
             phone=str(phone_val),
-            unit=str(unit_val),            valid=bool(phone_val),
+            unit=str(unit_val),
+            tenant_name=str(tenant_val),
+            valid=bool(phone_val),
             data=row_dict,
         )
         billing_rows.append(billing_row)

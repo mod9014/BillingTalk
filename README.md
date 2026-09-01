@@ -29,7 +29,4 @@ python main.py
 
 ## TODO
 
-- [ ] 각 모듈 구현 (services/, routes/)
-- [ ] 최초 설정 화면 완성
-- [ ] 엑셀 → 템플릿 변수 매핑 검증 로직
 - [ ] Windows 실행파일 빌드 확인 후 macOS/Linux 매트릭스 추가

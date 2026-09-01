@@ -58,6 +58,26 @@
     <div class="service-selection" id="service-selection" style="justify-items: center;">
     </div>
 
+    <!-- 템플릿 검수 상태 미완료 경고 배너 -->
+    <div class="template-status-warning-banner" id="template-status-warning-banner" style="display: none;">
+      <div class="warning-banner-left">
+        <span class="warning-banner-icon">⚠️</span>
+        <div class="warning-banner-content">
+          <div class="warning-banner-title">
+            <strong>알림톡 템플릿 검수 미완료 안내</strong>
+            <span class="badge badge-invalid" id="template-warning-status-badge">검수대기</span>
+          </div>
+          <p class="warning-banner-desc" id="template-warning-status-desc">
+            현재 선택된 알림톡 템플릿이 카카오 검수 완료 상태가 아닙니다.
+          </p>
+        </div>
+      </div>
+      <div class="warning-banner-action">
+        <a href="service-edit.html" id="template-warning-edit-link" class="btn btn-secondary btn-sm">서비스 설정 확인</a>
+      </div>
+    </div>
+
+
     <!-- 서비스가 선택되지 않았을 때의 안내 오버레이용 컨테이너 -->
     <div id="service-dependent-content">
 
@@ -131,6 +151,7 @@
                 <th>입주자명</th>
                 <th>연락처</th>
                 <th>상태</th>
+                <th>설명</th>
                 <th>처리 일시</th>
               </tr>
             </thead>
@@ -138,6 +159,24 @@
             </tbody>
           </table>
           <p class="empty-state" id="status-empty">아직 발송 이력이 없습니다.</p>
+        </div>
+
+        <!-- 발송 상태 페이지네이션 컨트롤 -->
+        <div class="pagination-container" id="status-pagination" style="display: none;">
+          <div class="pagination-info" id="status-pagination-info">
+            총 <strong id="status-pagination-total">0</strong>건 (<span id="status-pagination-page-current">1</span> / <span id="status-pagination-page-total">1</span> 페이지)
+          </div>
+          <div class="pagination-controls">
+            <div class="pagination-pages" id="status-pagination-pages"></div>
+            <div class="pagination-size-select-wrap">
+              <select id="status-page-size" class="pagination-size-select" title="페이지당 표시 건수">
+                <option value="10" selected>10개씩</option>
+                <option value="20">20개씩</option>
+                <option value="50">50개씩</option>
+                <option value="100">100개씩</option>
+              </select>
+            </div>
+          </div>
         </div>
 
         <p class="polling-indicator" id="polling-indicator">마지막 갱신: -</p>

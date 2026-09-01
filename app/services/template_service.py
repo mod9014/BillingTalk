@@ -1,17 +1,20 @@
 """
-알림톡 템플릿 목록 조회 및 변수(#{...}) 추출 서비스.
-현재는 로컬 파일(*.template)을 읽어 리스트로 제공하며, 향후 외부 API(Solapi 등) 연동을 위해 인터페이스화 됨.
+Solapi 카카오 알림톡 v2 템플릿 조회 및 변수(#{...}) 추출 서비스.
 """
 
-from pathlib import Path
-import re
+from __future__ import annotations
 
-ROOT_DIR = Path(__file__).resolve().parent.parent.parent
-DEFAULT_TEMPLATE_PATH = ROOT_DIR / "ailmtalk.template"
+import re
+from typing import Any
+
+from app.models import KakaoTemplate
+from app.services import solapi_client, storage
 
 
 def extract_variables(content: str) -> list[str]:
     """텍스트에서 #{변수명} 목록을 순서대로 중복 없이 추출."""
+    if not content:
+        return []
     raw_vars = re.findall(r"#\{([^}]+)\}", content)
     unique_vars = []
     for var in raw_vars:
@@ -21,71 +24,62 @@ def extract_variables(content: str) -> list[str]:
     return unique_vars
 
 
-def list_templates() -> list[dict]:
-    """
-    임시로 사용 가능한 알림톡 템플릿 목록 반환.
-    (로컬 디렉토리의 *.template 파일들을 스캔하여 반환)
-    """
-    templates = []
+def _parse_solapi_variables(solapi_data: dict, content: str) -> list[str]:
+    """Solapi v2 템플릿 응답의 variables 및 본문에서 변수명 목록 추출."""
+    vars_list: list[str] = []
+    raw_variables = solapi_data.get("variables")
+    if isinstance(raw_variables, list):
+        for item in raw_variables:
+            if isinstance(item, dict) and item.get("name"):
+                name = str(item["name"]).strip()
+                if name and name not in vars_list:
+                    if name.startswith("#{") and name.endswith("}"):
+                        vars_list.append(name[2:-1])
+                    else:
+                        vars_list.append(name)
+            elif isinstance(item, str):
+                name = item.strip()
+                if name and name not in vars_list:
+                    if name.startswith("#{") and name.endswith("}"):
+                        vars_list.append(name[2:-1])
+                    else:
+                        vars_list.append(name)
+    
+    return vars_list
 
-    # 1. 기본 템플릿 (ailmtalk.template)
-    if DEFAULT_TEMPLATE_PATH.exists():
-        try:
-            with open(DEFAULT_TEMPLATE_PATH, "r", encoding="utf-8") as f:
-                content = f.read()
-            templates.append({
-                "id": "local_default",
-                "name": "기본 관리비 청구서 (ailmtalk.template)",
-                "source": "local",
-                "content": content,
-                "variables": extract_variables(content),
-            })
-        except Exception as e:
-            print(f"기본 템플릿 로드 실패: {e}")
 
-    # 2. 기타 로컬 .template 파일들 스캔
-    for p in ROOT_DIR.glob("*.template"):
-        if p.name != "ailmtalk.template":
-            try:
-                with open(p, "r", encoding="utf-8") as f:
-                    c = f.read()
-                templates.append({
-                    "id": f"local_{p.stem}",
-                    "name": f"{p.stem} ({p.name})",
-                    "source": "local",
-                    "content": c,
-                    "variables": extract_variables(c),
-                })
-            except Exception:
-                pass
+def get_template_by_id(template_id: str, config: dict | None = None) -> dict[str, Any] | None:
+    """특정 ID의 Solapi 알림톡 템플릿 정보 조회 및 KakaoTemplate 모델로 정규화."""
 
-    if not templates:
-        # fallback
-        templates.append({
-            "id": "local_default",
-            "name": "기본 템플릿 (비어있음)",
-            "source": "local",
-            "content": "",
-            "variables": [],
+    cfg = config or storage.get_app_config()
+    st = solapi_client.get_solapi_template(template_id, cfg)
+    if st:
+        content = st.get("content", "")
+        vars_list = _parse_solapi_variables(st, content)
+        kt = KakaoTemplate.from_dict({
+            **st,
+            "variables": vars_list,
         })
+        d = kt.to_dict()
+        d["raw"] = st
+        return d
 
-    return templates
-
-
-def get_template_by_id(template_id: str) -> dict | None:
-    """특정 ID의 템플릿 정보 반환."""
-    templates = list_templates()
-    for t in templates:
-        if t["id"] == template_id:
-            return t
-    return templates[0] if templates else None
+    return None
 
 
-def load_template_info(template_id: str | None = None) -> dict:
-    """하위 호환용 헬퍼."""
+def load_template_info(template_id: str | None = None, config: dict | None = None) -> dict[str, Any]:
+    """템플릿 정보를 로드하는 헬퍼 함수."""
     if template_id:
-        t = get_template_by_id(template_id)
+        t = get_template_by_id(template_id, config)
         if t:
             return t
-    templates = list_templates()
-    return templates[0] if templates else {"content": "", "variables": []}
+
+    return {
+        "id": template_id or "",
+        "templateId": template_id or "",
+        "name": "",
+        "title": "",
+        "content": "",
+        "variables": [],
+        "buttons": [],
+    }

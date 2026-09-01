@@ -182,6 +182,10 @@ function stepCycle(direction) {
     selectedCycleDate.setMonth(selectedCycleDate.getMonth() + direction);
   }
 
+  if (typeof statusPaginationState !== "undefined") {
+    statusPaginationState.currentPage = 1;
+  }
+
   renderCycleNavigator();
   fetchStatus();
   fetchMappedPreview();
@@ -267,6 +271,9 @@ async function initServiceSelector() {
       const selectedSvc = servicesCache.find((s) => s.id === currentServiceId);
       currentServiceCycle = selectedSvc ? selectedSvc.send_cycle || "monthly" : "monthly";
       if (serviceSelection) serviceSelection.innerHTML = "<h1>" + selectedSvc.name + "</h1>";
+      if (typeof statusPaginationState !== "undefined") {
+        statusPaginationState.currentPage = 1;
+      }
 
       renderCycleNavigator();
       // 서비스 전환 시 상태 갱신 + 템플릿 로드 + 미리보기 초기화
@@ -274,7 +281,12 @@ async function initServiceSelector() {
       loadServiceTemplateForPreview(currentServiceId);
       renderPreview([]);
     } else {
+      if (typeof statusPaginationState !== "undefined") {
+        statusPaginationState.currentPage = 1;
+      }
       if (noSelectionMsg) noSelectionMsg.style.display = "block";
+      const warningBanner = $("#template-status-warning-banner");
+      if (warningBanner) warningBanner.style.display = "none";
       if (dependentContent) {
         dependentContent.style.display = "";
         dependentContent.style.opacity = "0.4";
@@ -419,7 +431,7 @@ async function fetchMappedPreview() {
           if (h.startsWith("#{") || h.startsWith("#")) {
             return `<th><span>${h.replace('#', '')}</span></th>`;
           }
-          if (h === "발송일" || h === "발송 예정일" || h === "수신 연락처") {
+          if (h === "발송일" || h === "발송시간" || h === "발송 예정일" || h === "발송 예정 시간" || h === "수신 연락처") {
             return `<th><span>${h}</span></th>`;
           }
           return `<th>${h}</th>`;
@@ -795,7 +807,7 @@ function recalculateMultiColumnFormulas(changedRowIdx, changedColIdx) {
       if (isResultColumnAlreadyEdited) return;
 
       const m = meta[varName] || {};
-      const fieldType = m.type || (varName === "send_date" ? "date" : "text");
+      const fieldType = m.type || (varName === "send_date" ? "date" : (varName === "send_time" ? "text" : "text"));
 
       const recalculated = evaluateFormulaClient(expr, rowObj, fieldType);
       if (recalculated === "" || recalculated === row[colIdx]) return;
@@ -949,7 +961,7 @@ function initPasteArea() {
         alert(data.error || "붙여넣은 내용을 처리하지 못했습니다.");
         return;
       }
-      renderPreview(data);
+      fetchMappedPreview();
     } catch (err) {
       alert(`서버와 통신할 수 없습니다: ${err.message}`);
     }
@@ -979,12 +991,17 @@ function initScheduleButton() {
   btn.addEventListener("click", async () => {
     const resultEl = $("#schedule-result");
 
-    // 1. 발송 예정일 결정 (테이블의 '발송일' 컬럼 우선, 없으면 오늘)
+    // 1. 발송 예정일 및 시간 결정 (테이블의 '발송일', '발송시간' 컬럼 우선)
     let scheduledDate = "";
+    let scheduledTime = "09:00";
     if (mappedDataState.rows.length > 0) {
       const sIdx = mappedDataState.headerVars.indexOf("send_date");
       if (sIdx !== -1 && mappedDataState.rows[0][sIdx]) {
         scheduledDate = mappedDataState.rows[0][sIdx].trim();
+      }
+      const tIdx = mappedDataState.headerVars.indexOf("send_time");
+      if (tIdx !== -1 && mappedDataState.rows[0][tIdx]) {
+        scheduledTime = mappedDataState.rows[0][tIdx].trim();
       }
     }
     if (!scheduledDate || !/^\d{4}-\d{2}-\d{2}$/.test(scheduledDate)) {
@@ -1033,12 +1050,19 @@ function initScheduleButton() {
           return;
         }
       } else {
+        const tStatus = String(typeof phonePreviewState !== "undefined" ? phonePreviewState.templateStatus || "" : "").trim().toUpperCase();
+        const isApproved = !tStatus || tStatus === "APPROVED" || tStatus === "승인" || tStatus === "검수완료";
+        const templateWarningText = !isApproved
+          ? `\n\n⚠️ [템플릿 검수 미완료 경고]\n현재 템플릿 상태가 [${tStatus}] 입니다. 카카오 검수가 완료(APPROVED)되지 않은 템플릿은 발송 시 실패할 수 있습니다.`
+          : "";
+
         const confirmPrompt =
           `🚨 [${currentCycleInfo.label} 청구 건] 으로 발송 예약을 등록하시겠습니까?\n\n` +
           `• 청구 기준 주기: ${currentCycleInfo.label} (${cycleKr})\n` +
-          `• 알림톡 발송 예정일: ${scheduledDate} 오전 9시\n` +
-          `• 발송 대상: 총 ${mappedDataState.rows.length}건\n\n` +
-          `※ 청구 기준 주기(${currentCycleInfo.label}) 및 발송일이 맞는지 다시 한 번 확인해 주세요.`;
+          `• 알림톡 발송 예정: ${scheduledDate} ${scheduledTime}\n` +
+          `• 발송 대상: 총 ${mappedDataState.rows.length}건` +
+          templateWarningText +
+          `\n\n※ 청구 기준 주기(${currentCycleInfo.label}) 및 발송일시가 맞는지 다시 한 번 확인해 주세요.`;
 
         if (!confirm(confirmPrompt)) {
           if (resultEl) resultEl.style.display = "none";
@@ -1054,6 +1078,7 @@ function initScheduleButton() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           scheduled_date: scheduledDate,
+          scheduled_time: scheduledTime,
           service_id: currentServiceId || 0,
           cycle_key: currentCycleInfo.key,
           force: true,
@@ -1075,8 +1100,14 @@ function initScheduleButton() {
 }
 
 // ---------------------------------------------------------------------------
-// index.html — 발송 상태 폴링 및 주기 필터링
+// index.html — 발송 상태 폴링, 주기 필터링 및 페이지네이션
 // ---------------------------------------------------------------------------
+
+const statusPaginationState = {
+  currentPage: 1,
+  pageSize: 10,
+  allRows: [],
+};
 
 function renderStatus(summary) {
   $("#summary-total").textContent = summary.total ?? "-";
@@ -1084,29 +1115,117 @@ function renderStatus(summary) {
   $("#summary-pending").textContent = summary.pending ?? "-";
   $("#summary-failed").textContent = summary.failed ?? "-";
 
+  statusPaginationState.allRows = summary.rows ?? [];
+  renderStatusPage();
+}
+
+function renderStatusPage() {
   const tbody = $("#status-table-body");
   const emptyEl = $("#status-empty");
+  const paginationContainer = $("#status-pagination");
+  if (!tbody) return;
+
   tbody.innerHTML = "";
+
+  const { allRows, pageSize } = statusPaginationState;
+  const total = allRows.length;
+  const totalPages = Math.ceil(total / pageSize) || 1;
+
+  if (statusPaginationState.currentPage > totalPages) {
+    statusPaginationState.currentPage = totalPages;
+  }
+  if (statusPaginationState.currentPage < 1) {
+    statusPaginationState.currentPage = 1;
+  }
+  const currentPage = statusPaginationState.currentPage;
 
   const statusBadge = {
     success: "badge-success",
     pending: "badge-pending",
     failed: "badge-failed",
   };
+  const statusCodeKR = {
+    success: "완료",
+    pending: "대기",
+    failed: "실패",
+  };
 
-  (summary.rows ?? []).forEach((row) => {
+  const startIdx = (currentPage - 1) * pageSize;
+  const pageRows = allRows.slice(startIdx, startIdx + pageSize);
+
+  pageRows.forEach((row) => {
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td>${row.unit ?? ""}</td>
       <td>${row.tenantName ?? ""}</td>
       <td>${row.phone ?? ""}</td>
-      <td><span class="badge ${statusBadge[row.status] ?? "badge-invalid"}">${row.statusLabel}</span></td>
+      <td><span class="badge ${statusBadge[row.status] ?? "badge-invalid"}">${statusCodeKR[row.status] ?? row.status}</span></td>
+      <td>${row.statusLabel ?? "-"}</td>
       <td>${row.processedAt ?? "-"}</td>
     `;
     tbody.appendChild(tr);
   });
 
   toggleEmptyState(tbody, emptyEl);
+
+  // 페이지네이션 컨트롤 업데이트
+  if (paginationContainer) {
+    if (total === 0) {
+      paginationContainer.style.display = "none";
+    } else {
+      paginationContainer.style.display = "flex";
+      const totalEl = $("#status-pagination-total");
+      const currentEl = $("#status-pagination-page-current");
+      const pageTotalEl = $("#status-pagination-page-total");
+
+      if (totalEl) totalEl.textContent = total.toLocaleString();
+      if (currentEl) currentEl.textContent = currentPage;
+      if (pageTotalEl) pageTotalEl.textContent = totalPages;
+
+      renderStatusPaginationButtons(currentPage, totalPages);
+    }
+  }
+}
+
+function renderStatusPaginationButtons(currentPage, totalPages) {
+  const container = $("#status-pagination-pages");
+  if (!container) return;
+  container.innerHTML = "";
+
+  const createBtn = (text, page, isActive = false, isDisabled = false, title = "") => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pagination-btn" + (isActive ? " active" : "");
+    btn.textContent = text;
+    if (title) btn.title = title;
+    btn.disabled = isDisabled;
+    if (!isDisabled && !isActive) {
+      btn.addEventListener("click", () => {
+        statusPaginationState.currentPage = page;
+        renderStatusPage();
+      });
+    }
+    return btn;
+  };
+
+  // 1. 처음(«) / 이전(‹)
+  container.appendChild(createBtn("«", 1, false, currentPage <= 1, "첫 페이지"));
+  container.appendChild(createBtn("‹", currentPage - 1, false, currentPage <= 1, "이전 페이지"));
+
+  // 2. 페이지 번호 (최대 5개 표시)
+  let startPage = Math.max(1, currentPage - 2);
+  let endPage = Math.min(totalPages, startPage + 4);
+  if (endPage - startPage < 4) {
+    startPage = Math.max(1, endPage - 4);
+  }
+
+  for (let p = startPage; p <= endPage; p++) {
+    container.appendChild(createBtn(String(p), p, p === currentPage));
+  }
+
+  // 3. 다음(›) / 마지막(»)
+  container.appendChild(createBtn("›", currentPage + 1, false, currentPage >= totalPages, "다음 페이지"));
+  container.appendChild(createBtn("»", totalPages, false, currentPage >= totalPages, "마지막 페이지"));
 }
 
 async function fetchStatus() {
@@ -1133,12 +1252,22 @@ function initStatusPolling() {
   const refreshBtn = $("#refresh-status-btn");
   const filterCurrentBtn = $("#filter-current-cycle-btn");
   const filterAllBtn = $("#filter-all-cycle-btn");
+  const pageSizeSelect = $("#status-page-size");
 
   if (refreshBtn) refreshBtn.addEventListener("click", fetchStatus);
+
+  if (pageSizeSelect) {
+    pageSizeSelect.addEventListener("change", (e) => {
+      statusPaginationState.pageSize = parseInt(e.target.value, 10) || 10;
+      statusPaginationState.currentPage = 1;
+      renderStatusPage();
+    });
+  }
 
   if (filterCurrentBtn && filterAllBtn) {
     filterCurrentBtn.addEventListener("click", () => {
       currentCycleFilterMode = "current";
+      statusPaginationState.currentPage = 1;
       filterCurrentBtn.classList.add("active");
       filterAllBtn.classList.remove("active");
       fetchStatus();
@@ -1146,6 +1275,7 @@ function initStatusPolling() {
 
     filterAllBtn.addEventListener("click", () => {
       currentCycleFilterMode = "all";
+      statusPaginationState.currentPage = 1;
       filterAllBtn.classList.add("active");
       filterCurrentBtn.classList.remove("active");
       fetchStatus();
@@ -1179,7 +1309,12 @@ let setupState = {
   // mappingMeta[varKey] = { type: 'text'|'name'|'phone'|'date'|'amount', required: true|false, defaultValue: '' }
   mappingMeta: {},
   templateRawContent: "",
+  templateItem: null,       // { list: [{title, description}, ...], summary: {...} }
+  templateHighlight: null,  // { title, description }
+  templateHeader: "",
+  templateExtra: "",
 };
+
 
 function parseDelimitedHeaders(text) {
   if (!text) return [];
@@ -1224,22 +1359,50 @@ function renderHeaderTags() {
 }
 
 function renderTemplatePreview() {
-  const previewBox = $("#template-preview-content");
-  if (!previewBox) return;
+  const content = setupState.templateRawContent || "";
 
-  if (!setupState.templateRawContent) {
-    previewBox.textContent = "템플릿 내용이 없습니다.";
-    return;
+  // 스마트폰 알림톡 실시간 미리보기 위젯 동기화
+  if (typeof phonePreviewState !== "undefined") {
+    phonePreviewState.templateContent = content;
+    phonePreviewState.templateItem = (setupState && setupState.templateItem) || null;
+    phonePreviewState.templateHighlight = (setupState && setupState.templateHighlight) || null;
+    phonePreviewState.templateHeader = (setupState && setupState.templateHeader) || "";
+    phonePreviewState.templateExtra = (setupState && setupState.templateExtra) || "";
+
+    const sNameInput = $("#service-name");
+    const sName = sNameInput ? sNameInput.value.trim() : "";
+    const pfSelect = $("#pf-id-select");
+    const pfSelectedOpt = pfSelect ? pfSelect.querySelector("option:checked") : null;
+    const pfName = pfSelectedOpt && pfSelectedOpt.value ? pfSelectedOpt.textContent.split("(")[0].trim() : "";
+
+    phonePreviewState.serviceName = sName || pfName || "알림톡";
+
+    const templateSelect = $("#template-select");
+    const tSelectedOpt = templateSelect ? templateSelect.querySelector("option:checked") : null;
+    phonePreviewState.templateTitle = tSelectedOpt && tSelectedOpt.value ? tSelectedOpt.textContent.split("(")[0].trim() : "청구서 고지";
+
+    if (typeof renderPhonePreview === "function") {
+      renderPhonePreview();
+    }
   }
 
-  const escaped = setupState.templateRawContent
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 
-  const highlighted = escaped.replace(/#\{([^}]+)\}/g, '<span class="template-var-highlight">#{$1}</span>');
-  previewBox.innerHTML = highlighted;
+
+  const previewBox = $("#template-preview-content");
+  if (previewBox) {
+    if (!content) {
+      previewBox.textContent = "템플릿 내용이 없습니다.";
+      return;
+    }
+    const escaped = content
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    const highlighted = escaped.replace(/#\{([^}]+)\}/g, '<span class="template-var-highlight">#{$1}</span>');
+    previewBox.innerHTML = highlighted;
+  }
 }
+
 
 function closeAllDropdowns() {
   document.querySelectorAll(".autocomplete-dropdown.show").forEach((d) => {
@@ -1475,7 +1638,7 @@ function renderMappingTable() {
   setupState.templateVariables.forEach((varName) => {
     const currentVal =
       setupState.templateMapping[varName] ||
-      setupState.templateMapping[`#{${varName}}`] ||
+      setupState.templateMapping[`${varName}`] ||
       "";
     const meta = setupState.mappingMeta[varName] || {};
     const type = meta.type || "text";
@@ -1750,7 +1913,7 @@ function runAutoMapping() {
 // service-edit.html — 서비스 생성/수정 폼 (발신 프로필 pfId & 알림톡 템플릿 선택)
 // ---------------------------------------------------------------------------
 
-async function loadTemplateList(pfId = "", selectedTid = "local_default") {
+async function loadTemplateList(pfId = "", selectedTid = "") {
   const templateSelect = $("#template-select");
   if (!templateSelect) return;
 
@@ -1760,20 +1923,21 @@ async function loadTemplateList(pfId = "", selectedTid = "local_default") {
     if (tRes.ok) {
       const tData = await readJson(tRes);
       const templates = tData.templates || [];
-      templateSelect.innerHTML = "";
+      templateSelect.innerHTML = `<option value="">-- 카카오톡 채널을 선택해주세요 --</option>`;
 
       templates.forEach((t) => {
         const opt = document.createElement("option");
-        opt.value = t.id;
-        opt.textContent = t.title || t.name || t.id;
-        if (t.id === selectedTid) opt.selected = true;
+        const tid = t.templateId || t.id;
+        opt.value = tid;
+        opt.textContent = `${t.name || t.title || tid} (${tid})`;
+        if (tid === selectedTid) opt.selected = true;
         templateSelect.appendChild(opt);
       });
 
       // 만약 선택된 템플릿이 목록에 없으면 직접 입력용 input에 표시
-      const hasSelected = templates.some((t) => t.id === selectedTid);
+      const hasSelected = templates.some((t) => (t.templateId || t.id) === selectedTid);
       const customTidInp = $("#custom-template-id");
-      if (!hasSelected && selectedTid && selectedTid !== "local_default" && customTidInp) {
+      if (!hasSelected && selectedTid && customTidInp) {
         customTidInp.value = selectedTid;
       }
     }
@@ -1784,7 +1948,6 @@ async function loadTemplateList(pfId = "", selectedTid = "local_default") {
 
 async function loadSolapiSenders(selectedPfId = "") {
   const pfSelect = $("#pf-id-select");
-  const pfInput = $("#pf-id");
   if (!pfSelect) return;
 
   try {
@@ -1811,7 +1974,7 @@ async function loadSolapiSenders(selectedPfId = "") {
 
 async function loadServiceEditData(serviceId) {
   try {
-    let selectedTemplateId = "local_default";
+    let selectedTemplateId = "";
     let selectedPfId = "";
 
     if (serviceId) {
@@ -1828,9 +1991,8 @@ async function loadServiceEditData(serviceId) {
       if ($("#send-cycle")) $("#send-cycle").value = data.send_cycle || "monthly";
 
       selectedPfId = data.pf_id || "";
-      if ($("#pf-id")) $("#pf-id").value = selectedPfId;
 
-      selectedTemplateId = data.template_id || "local_default";
+      selectedTemplateId = data.template_id || "";
 
       if (data.excel_headers && Array.isArray(data.excel_headers) && data.excel_headers.length > 0) {
         setupState.excelHeaders = [...data.excel_headers];
@@ -1847,6 +2009,18 @@ async function loadServiceEditData(serviceId) {
       if (data.template_content) {
         setupState.templateRawContent = data.template_content;
       }
+      // 서비스 수정 진입 시 템플릿 필드 파싱
+      setupState.templateHeader = data.template_header || "";
+      setupState.templateExtra = data.template_extra || "";
+      try {
+        const h = data.template_highlight;
+        setupState.templateHighlight = (h && typeof h === "object") ? h : (typeof h === "string" && h ? JSON.parse(h) : null);
+      } catch (_) { setupState.templateHighlight = null; }
+      try {
+        const rawItem = data.template_item;
+        setupState.templateItem = (rawItem && typeof rawItem === "object") ? rawItem
+          : (typeof rawItem === "string" && rawItem ? JSON.parse(rawItem) : null);
+      } catch (_) { setupState.templateItem = null; }
 
       // 페이지 타이틀 변경
       const pageTitle = $("#page-title");
@@ -1855,18 +2029,6 @@ async function loadServiceEditData(serviceId) {
       // 삭제 버튼 표시
       const deleteBtn = $("#service-delete-btn");
       if (deleteBtn) deleteBtn.style.display = "";
-    } else {
-      // 생성 모드: 첫 번째/기본 템플릿 정보 로드
-      const res = await fetch(`/api/template?template_id=local_default`);
-      if (res.ok) {
-        const data = await readJson(res);
-        if (data.variables && Array.isArray(data.variables)) {
-          setupState.templateVariables = [...data.variables];
-        }
-        if (data.content) {
-          setupState.templateRawContent = data.content;
-        }
-      }
     }
 
     // Solapi 카카오 채널 및 템플릿 목록 동기 로드
@@ -1881,10 +2043,17 @@ async function loadServiceEditData(serviceId) {
     if (Object.keys(setupState.templateMapping).length === 0) {
       runAutoMapping();
     }
+
+    // 서비스 수정 모드 진입 시 템플릿이 로드되어 있으면 미리보기 위젯 자동 열기
+    if (setupState.templateRawContent && typeof togglePhoneWidget === "function") {
+      togglePhoneWidget(false);
+    }
+
   } catch (err) {
     console.error("서비스 데이터 로드 실패", err);
   }
 }
+
 
 function initServiceEditForm() {
   const form = $("#service-edit-form");
@@ -1893,21 +2062,25 @@ function initServiceEditForm() {
   const serviceId = getUrlParam("id");
   loadServiceEditData(serviceId);
 
-  // 0-1. 발신 프로필(pfId) 선택 드롭다운 연동
-  const pfSelect = $("#pf-id-select");
-  const pfInput = $("#pf-id");
-  if (pfSelect && pfInput) {
-    pfSelect.addEventListener("change", () => {
-      if (pfSelect.value) {
-        pfInput.value = pfSelect.value;
-        loadTemplateList(pfSelect.value, $("#template-select")?.value || "local_default");
-      }
-    });
-    pfInput.addEventListener("blur", () => {
-      const val = pfInput.value.trim();
-      loadTemplateList(val, $("#template-select")?.value || "local_default");
+  // 0-0. 서비스 이름 실시간 미리보기 연동
+  const serviceNameInput = $("#service-name");
+  if (serviceNameInput) {
+    serviceNameInput.addEventListener("input", () => {
+      renderTemplatePreview();
     });
   }
+
+  // 0-1. 발신 프로필(pfId) 선택 드롭다운 연동
+  const pfSelect = $("#pf-id-select");
+  if (pfSelect) {
+    pfSelect.addEventListener("change", () => {
+      if (pfSelect.value) {
+        loadTemplateList(pfSelect.value, $("#template-select")?.value || "");
+      }
+      renderTemplatePreview();
+    });
+  }
+
 
   // 0-1-1. 엑셀 컬럼 ? 툴팁 클릭 토글
   const tooltipTrigger = $(".header-tooltip-trigger");
@@ -1933,15 +2106,34 @@ function initServiceEditForm() {
     templateSelect.addEventListener("change", async () => {
       const selectedTid = templateSelect.value;
       if (customTidInput) customTidInput.value = "";
+      if (!selectedTid) return;
       try {
         const res = await fetch(`/api/template?template_id=${encodeURIComponent(selectedTid)}`);
         if (res.ok) {
           const data = await readJson(res);
+          console.log(data);
           setupState.templateVariables = data.variables || [];
           setupState.templateRawContent = data.content || "";
+          // 템플릿 필드 파싱
+          setupState.templateHeader = data.header || "";
+          setupState.templateExtra = data.extra || "";
+          try {
+            const h = data.highlight;
+            setupState.templateHighlight = (h && typeof h === "object") ? h : (typeof h === "string" && h ? JSON.parse(h) : null);
+          } catch (_) { setupState.templateHighlight = null; }
+          try {
+            const rawItem = data.item;
+            setupState.templateItem = (rawItem && typeof rawItem === "object" && !Array.isArray(rawItem)) ? rawItem
+              : (typeof rawItem === "string" && rawItem ? JSON.parse(rawItem) : null);
+          } catch (_) { setupState.templateItem = null; }
           renderTemplatePreview();
           renderMappingTable();
           runAutoMapping();
+
+          // 템플릿 선택 시 스마트폰 미리보기 위젯 자동 펼침(열기)
+          if (typeof togglePhoneWidget === "function") {
+            togglePhoneWidget(false);
+          }
         }
       } catch (err) {
         console.error("템플릿 변경 실패", err);
@@ -1959,14 +2151,32 @@ function initServiceEditForm() {
             const data = await readJson(res);
             setupState.templateVariables = data.variables || [];
             setupState.templateRawContent = data.content || "";
+            // 템플릿 필드 파싱
+            setupState.templateHeader = data.header || "";
+            setupState.templateExtra = data.extra || "";
+            try {
+              const h = data.highlight;
+              setupState.templateHighlight = (h && typeof h === "object") ? h : (typeof h === "string" && h ? JSON.parse(h) : null);
+            } catch (_) { setupState.templateHighlight = null; }
+            try {
+              const rawItem = data.item;
+              setupState.templateItem = (rawItem && typeof rawItem === "object" && !Array.isArray(rawItem)) ? rawItem
+                : (typeof rawItem === "string" && rawItem ? JSON.parse(rawItem) : null);
+            } catch (_) { setupState.templateItem = null; }
             renderTemplatePreview();
             renderMappingTable();
             runAutoMapping();
+
+            // 템플릿 입력 시 스마트폰 미리보기 위젯 자동 펼침(열기)
+            if (typeof togglePhoneWidget === "function") {
+              togglePhoneWidget(false);
+            }
           }
         } catch (_) { }
       }
     });
   }
+
 
   // 1. 일괄 헤더 추가/반영
   const bulkInput = $("#bulk-headers-input");
@@ -2046,8 +2256,8 @@ function initServiceEditForm() {
         name: sName,
         description: $("#service-desc") ? $("#service-desc").value.trim() : "",
         send_cycle: $("#send-cycle") ? $("#send-cycle").value : "monthly",
-        pf_id: $("#pf-id") ? $("#pf-id").value.trim() : "",
-        template_id: $("#custom-template-id")?.value.trim() || ($("#template-select") ? $("#template-select").value : "local_default"),
+        pf_id: $("#pf-id-select") ? $("#pf-id-select").value.trim() : "",
+        template_id: $("#custom-template-id")?.value.trim() || ($("#template-select") ? $("#template-select").value : ""),
         excel_headers: setupState.excelHeaders,
         template_mapping: setupState.templateMapping,
         mapping_meta: setupState.mappingMeta,
@@ -2088,9 +2298,9 @@ function initServiceEditForm() {
         if ($("#service-name") && json.name) $("#service-name").value = json.name;
         if ($("#service-desc")) $("#service-desc").value = json.description || "";
         if ($("#send-cycle") && json.send_cycle) $("#send-cycle").value = json.send_cycle;
-        if ($("#pf-id")) $("#pf-id").value = json.pf_id || "";
+        // pf-id는 loadSolapiSenders가 드롭다운 선택 처리
 
-        const tid = json.template_id || "local_default";
+        const tid = json.template_id || "";
         if ($("#custom-template-id")) $("#custom-template-id").value = "";
 
         if (json.excel_headers && Array.isArray(json.excel_headers)) {
@@ -2153,9 +2363,10 @@ function initServiceEditForm() {
     const serviceName = $("#service-name") ? $("#service-name").value.trim() : "";
     const serviceDesc = $("#service-desc") ? $("#service-desc").value.trim() : "";
     const sendCycle = $("#send-cycle") ? $("#send-cycle").value : "monthly";
-    const pfId = $("#pf-id") ? $("#pf-id").value.trim() : "";
+    const pfId = $("#pf-id-select") ? $("#pf-id-select").value.trim() : "";
     const customTid = $("#custom-template-id") ? $("#custom-template-id").value.trim() : "";
-    const templateId = customTid || ($("#template-select") ? $("#template-select").value : "local_default");
+    const templateId = customTid || ($("#template-select") ? $("#template-select").value : "");
+
 
     if (!serviceName) {
       alert("서비스 이름을 입력해주세요.");

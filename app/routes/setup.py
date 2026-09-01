@@ -19,7 +19,6 @@ router = APIRouter()
 class SetupPayload(BaseModel):
     solapi_key: Optional[str] = ""
     solapi_secret: Optional[str] = ""
-    sender_phone: Optional[str] = ""
 
 
 @router.post("/setup")
@@ -35,7 +34,6 @@ async def get_setup_status():
 
     return {
         "configured": is_configured(config),
-        "sender_phone": config.get("sender_phone", ""),
         # solapi_key / solapi_secret은 절대 프론트로 내려보내지 않는다.
     }
 
@@ -51,7 +49,8 @@ async def get_template_and_mapping(
         if svc:
             target_tid = svc.get("template_id")
 
-    template_info = template_service.load_template_info(target_tid)
+    config = storage.get_app_config()
+    template_info = template_service.load_template_info(target_tid, config)
 
     db_headers = storage.get_excel_headers(service_id)
     headers = db_headers if db_headers else []
@@ -60,12 +59,31 @@ async def get_template_and_mapping(
     mapping = db_mapping if db_mapping else {}
 
     return {
-        "template_id": template_info.get("id", "local_default"),
+        "template_id": template_info.get("id", ""),
+        "templateId": template_info.get("templateId") or template_info.get("id", ""),
         "template_name": template_info.get("name", ""),
+
+        "name": template_info.get("name", ""),
         "content": template_info.get("content", ""),
         "variables": template_info.get("variables", []),
+        "buttons": template_info.get("buttons") or [],
+        "quickReplies": template_info.get("quickReplies") or [],
+        "highlight": template_info.get("highlight"),
+        "item": template_info.get("item"),
+        "status": template_info.get("status"),
+        "messageType": template_info.get("messageType"),
+        "emphasizeType": template_info.get("emphasizeType"),
+        "emphasizeTitle": template_info.get("emphasizeTitle"),
+        "emphasizeSubtitle": template_info.get("emphasizeSubtitle"),
+        "extra": template_info.get("extra"),
+        "ad": template_info.get("ad"),
+        "header": template_info.get("header"),
+        "channelId": template_info.get("channelId"),
+        "categoryCode": template_info.get("categoryCode"),
         "error": template_info.get("error"),
         "excel_headers": headers,
         "template_mapping": mapping,
+        "raw": template_info.get("raw"),
     }
+
 

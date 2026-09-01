@@ -24,7 +24,7 @@ from app.models import BillingRow, SendResult
 
 BASE_URL = "https://api.solapi.com"
 SEND_URL = f"{BASE_URL}/messages/v4/send-many/detail"
-LIST_URL = f"{BASE_URL}/messages/v4/list-old"
+LIST_URL = f"{BASE_URL}/messages/v4/list"
 
 TIMEOUT_SEC = 15
 
@@ -52,7 +52,7 @@ def _auth_header(api_key: str, api_secret: str) -> dict:
 
 
 def _require_config(config: dict) -> None:
-    missing = [k for k in ("solapi_key", "solapi_secret", "solapi_sender", "template_id") if not config.get(k)]
+    missing = [k for k in ("solapi_key", "solapi_secret") if not config.get(k)]
     if missing:
         raise SolapiError(f"Solapi 설정이 누락되었습니다: {', '.join(missing)} (설정 화면에서 입력해주세요)")
 
@@ -101,29 +101,17 @@ def send_reserved(
     body = resp.json()
     group_id = (body.get("groupInfo") or {}).get("groupId") or body.get("groupId")
     message_list = body.get("messageList") or {}
+    
 
     results: list[SendResult] = []
-    if isinstance(message_list, dict) and message_list:
-        # {messageId: {...}} 형태 (list-old와 동일 포맷으로 반환되는 것으로 추정)
-        for message_id, info in message_list.items():
+    for info in message_list:
             results.append(SendResult(
-                message_id=message_id,
+                message_id=info.get("messageId"),
                 group_id=group_id,
-                to=info.get("to", ""),
+                to=info.get("customFields").get("unit"),
                 status_code=info.get("statusCode"),
                 status_message=info.get("statusMessage"),
                 date_processed=info.get("dateProcessed"),
-            ))
-    else:
-        # 응답에 개별 메시지 목록이 없으면 groupId만으로 대기 상태 기록 (다음 폴링에서 get_status로 채움)
-        for row in rows:
-            results.append(SendResult(
-                message_id=None,
-                group_id=group_id,
-                to=row.phone,
-                status_code=None,
-                status_message="예약 등록됨 (상태 확인 대기)",
-                date_processed=None,
             ))
 
     return results
@@ -154,14 +142,15 @@ def get_status(group_id: str, config: dict) -> list[SendResult]:
             group_id=group_id,
             to=info.get("to", ""),
             status_code=info.get("statusCode"),
-            status_message=info.get("statusMessage"),
+            status=info.get("status"),
+            status_message=info.get("reason"),
             date_processed=info.get("dateProcessed"),
         ))
     return results
 
 
-def list_plus_friends(config: dict) -> list[dict]:
-    """등록된 카카오톡 채널(발신 프로필 pfId) 목록 조회."""
+def list_friends(config: dict) -> list[dict]:
+    """등록된 카카오톡 채널(발신 프로필 pfId / channelId) 목록 조회."""
     if not config.get("solapi_key") or not config.get("solapi_secret"):
         return []
     headers = _auth_header(config["solapi_key"], config["solapi_secret"])
@@ -170,23 +159,64 @@ def list_plus_friends(config: dict) -> list[dict]:
         resp = requests.get(url, headers=headers, timeout=TIMEOUT_SEC)
         if resp.status_code == 200:
             data = resp.json()
-            return data if isinstance(data, list) else data.get("plusFriends", [])
-    except Exception:
-        pass
+            return data if isinstance(data, list) else data.get("friends", [])
+    except Exception as e:
+        print(f"Solapi 발신 프로필 목록 조회 실패: {e}")
     return []
+
+
+def get_solapi_template(template_id: str, config: dict) -> dict | None:
+    """Solapi 카카오 알림톡 템플릿 단건 상세 조회 (GET /kakao/v2/templates/:templateId)."""
+    if not config.get("solapi_key") or not config.get("solapi_secret") or not template_id:
+        return None
+    headers = _auth_header(config["solapi_key"], config["solapi_secret"])
+    url = f"{BASE_URL}/kakao/v2/templates/{template_id}"
+    try:
+        resp = requests.get(url, headers=headers, timeout=TIMEOUT_SEC)
+        if resp.status_code == 200:
+            return resp.json()
+        elif resp.status_code != 404:
+            # v1 엔드포인트 fallback 시도
+            fallback_url = f"{BASE_URL}/kakao/v1/templates/{template_id}"
+            fb_resp = requests.get(fallback_url, headers=headers, timeout=TIMEOUT_SEC)
+            if fb_resp.status_code == 200:
+                return fb_resp.json()
+    except Exception as e:
+        print(f"Solapi 템플릿 단건 조회 실패 ({template_id}): {e}")
+    return None
 
 
 def list_solapi_templates(pf_id: str, config: dict) -> list[dict]:
-    """특정 발신 프로필(pfId)에 등록된 알림톡 템플릿 목록 조회."""
+    """특정 발신 프로필(pfId / channelId)에 등록된 알림톡 템플릿 목록 조회."""
     if not config.get("solapi_key") or not config.get("solapi_secret") or not pf_id:
         return []
     headers = _auth_header(config["solapi_key"], config["solapi_secret"])
-    url = f"{BASE_URL}/kakao/v1/templates"
+    
+    # 1. v2 템플릿 목록 조회 시도
+    v2_url = f"{BASE_URL}/kakao/v2/templates"
     try:
-        resp = requests.get(url, headers=headers, params={"pfId": pf_id}, timeout=TIMEOUT_SEC)
+        resp = requests.get(v2_url, headers=headers, params={"channelId": pf_id}, timeout=TIMEOUT_SEC)
         if resp.status_code == 200:
             data = resp.json()
-            return data if isinstance(data, list) else data.get("templates", [])
-    except Exception:
-        pass
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return data.get("templateList") or data.get("templates") or data.get("items") or []
+    except Exception as e:
+        print(f"Solapi v2 템플릿 목록 조회 실패: {e}")
+
+    # 2. v1 템플릿 목록 조회 fallback
+    v1_url = f"{BASE_URL}/kakao/v1/templates"
+    try:
+        resp = requests.get(v1_url, headers=headers, params={"pfId": pf_id}, timeout=TIMEOUT_SEC)
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict):
+                return data.get("templateList") or data.get("templates") or []
+    except Exception as e:
+        print(f"Solapi v1 템플릿 목록 조회 실패: {e}")
+
     return []
+

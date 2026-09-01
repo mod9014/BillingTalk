@@ -17,31 +17,56 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
+from cryptography.fernet import Fernet, InvalidToken
+
 from app.models import BillingRow, SendResult
 
 DB_DIR = Path.home() / ".officetel-bill"
 DB_PATH = DB_DIR / "data.db"
+SECRET_KEY_PATH = DB_DIR / "secret.key"
 
-# Solapi statusCode 예시(문서 기준 추정치 포함) -> 대시보드 상태 라벨.
-# NOTE: 실제 키 발급 후 첫 발송 테스트에서 statusCode 값을 확인해 이 매핑을 보정할 것.
-SUCCESS_CODES = {"2000", "3000", "4000"}   # 성공/전송완료류
-FAILURE_CODES = {"3001", "4100", "4101"}   # 실패류 (미확정 — 실제 응답으로 보정 필요)
+# DB에 암호화하여 저장할 민감 필드 목록
+_ENCRYPTED_FIELDS = {"solapi_secret"}
+
 
 VALID_SEND_CYCLES = {"daily", "weekly", "monthly", "quarterly", "half_yearly", "yearly"}
 
 
-def _status_label(status_code: str | None) -> str:
-    if not status_code:
-        return "pending"
-    if status_code in SUCCESS_CODES:
-        return "success"
-    if status_code in FAILURE_CODES:
-        return "failed"
-    return "pending"
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# ---------------------------------------------------------------------------
+# 암호화 헬퍼
+# ---------------------------------------------------------------------------
+
+def _get_fernet() -> Fernet:
+    """Fernet 인스턴스를 반환. 키 파일이 없으면 새로 생성."""
+    DB_DIR.mkdir(exist_ok=True)
+    if not SECRET_KEY_PATH.exists():
+        key = Fernet.generate_key()
+        SECRET_KEY_PATH.write_bytes(key)
+        SECRET_KEY_PATH.chmod(0o600)  # 소유자 읽기/쓰기 전용
+    else:
+        key = SECRET_KEY_PATH.read_bytes()
+    return Fernet(key)
+
+
+def _encrypt(value: str) -> str:
+    """문자열을 암호화하여 'enc:' 접두사를 붙인 Base64 문자열로 반환."""
+    token = _get_fernet().encrypt(value.encode())
+    return "enc:" + token.decode()
+
+
+def _decrypt(value: str) -> str:
+    """'enc:' 접두사가 있는 암호화 문자열을 복호화. 평문이면 그대로 반환(레거시 호환)."""
+    if not value.startswith("enc:"):
+        return value  # 기존 평문값 그대로 반환
+    try:
+        return _get_fernet().decrypt(value[4:].encode()).decode()
+    except (InvalidToken, Exception):
+        return value  # 복호화 실패 시 원본 반환
 
 
 @contextmanager
@@ -58,7 +83,7 @@ def _connect():
 
 def init_db() -> None:
     with _connect() as conn:
-        # 서비스 테이블 (발송 주기 send_cycle, 발신 프로필 pf_id, 선택 템플릿 ID template_id 포함)
+        # 서비스 테이블 (발송 주기 send_cycle, 발신 프로필 pf_id, 선택 템플릿 ID template_id, 템플릿 정보 및 수정일시 포함)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS services (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,11 +91,14 @@ def init_db() -> None:
                 description TEXT DEFAULT '',
                 send_cycle TEXT NOT NULL DEFAULT 'monthly',
                 pf_id TEXT NOT NULL DEFAULT '',
-                template_id TEXT NOT NULL DEFAULT 'local_default',
+                template_id TEXT NOT NULL DEFAULT '',
+                template_data TEXT DEFAULT '',
+                template_date_updated TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         """)
+
         conn.execute("""
             CREATE TABLE IF NOT EXISTS billing (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -81,8 +109,6 @@ def init_db() -> None:
                 unit TEXT NOT NULL,
                 tenant_name TEXT NOT NULL,
                 phone TEXT NOT NULL,
-                amount_on_time INTEGER NOT NULL,
-                amount_late INTEGER NOT NULL,
                 template_vars TEXT NOT NULL,
                 created_at TEXT NOT NULL
             )
@@ -122,6 +148,32 @@ def init_db() -> None:
                 created_at TEXT NOT NULL
             )
         """)
+        # 템플릿 테이블 (service_id 외래키 연동)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS templates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                service_id INTEGER NOT NULL UNIQUE,
+                template_id TEXT NOT NULL,
+                name TEXT NOT NULL DEFAULT '',
+                content TEXT NOT NULL DEFAULT '',
+                variables TEXT NOT NULL DEFAULT '[]',
+                buttons TEXT NOT NULL DEFAULT '[]',
+                extra TEXT DEFAULT '',
+                ad TEXT DEFAULT '',
+                emphasize_type TEXT DEFAULT '',
+                emphasize_title TEXT DEFAULT '',
+                header TEXT DEFAULT '',
+                highlight TEXT DEFAULT '{}',
+                item TEXT DEFAULT '{}',
+                status TEXT DEFAULT '',
+                date_created TEXT DEFAULT '',
+                date_updated TEXT DEFAULT '',
+                raw_data TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE CASCADE
+            )
+        """)
         # 전역 시스템 설정 테이블 (Solapi 인증키, 대체발송번호 등)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS app_config (
@@ -134,24 +186,18 @@ def init_db() -> None:
         _migrate_columns(conn)
 
 
+
 def get_app_config() -> dict[str, str]:
-    """DB에 저장된 전역 설정 조회 (기존 config.json이 있으면 최초 1회 자동 이전)."""
+    """DB에 저장된 전역 설정 조회 (암호화 필드는 복호화하여 반환)."""
     init_db()
     with _connect() as conn:
         rows = conn.execute("SELECT key, value FROM app_config").fetchall()
         config_dict = {r["key"]: r["value"] for r in rows}
 
-    # 만약 DB 설정이 비어있다면, 기존 파일(config.json)에서 마이그레이션 시도
-    if not config_dict:
-        try:
-            legacy_path = Path.home() / ".officetel-bill" / "config.json"
-            if legacy_path.exists():
-                with open(legacy_path, "r", encoding="utf-8") as f:
-                    legacy = json.load(f)
-                if isinstance(legacy, dict) and legacy:
-                    config_dict = save_app_config(legacy)
-        except Exception:
-            pass
+    # 암호화 필드 복호화
+    for field in _ENCRYPTED_FIELDS:
+        if field in config_dict:
+            config_dict[field] = _decrypt(config_dict[field])
 
     return config_dict
 
@@ -175,19 +221,21 @@ def save_app_config(data: dict) -> dict[str, str]:
 
     with _connect() as conn:
         for k, v in merged.items():
+            # 암호화 필드는 암호화하여 저장
+            store_v = _encrypt(v) if k in _ENCRYPTED_FIELDS and v else v
             conn.execute(
                 """INSERT INTO app_config (key, value, updated_at)
                    VALUES (?, ?, ?)
                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at""",
-                (k, v, now),
+                (k, store_v, now),
             )
 
     return merged
 
 
 def _migrate_columns(conn: sqlite3.Connection) -> None:
-    """기존 DB에 누락된 컬럼(service_id, send_cycle, pf_id, template_id, cycle_key) 추가 마이그레이션."""
-    # services -> send_cycle, pf_id, template_id
+    """기존 DB에 누락된 컬럼(service_id, send_cycle, pf_id, template_id, template_data, template_date_updated, cycle_key) 추가 마이그레이션."""
+    # services -> send_cycle, pf_id, template_id, template_data, template_date_updated
     try:
         cols = [row[1] for row in conn.execute("PRAGMA table_info(services)").fetchall()]
         if "send_cycle" not in cols:
@@ -195,9 +243,14 @@ def _migrate_columns(conn: sqlite3.Connection) -> None:
         if "pf_id" not in cols:
             conn.execute("ALTER TABLE services ADD COLUMN pf_id TEXT NOT NULL DEFAULT ''")
         if "template_id" not in cols:
-            conn.execute("ALTER TABLE services ADD COLUMN template_id TEXT NOT NULL DEFAULT 'local_default'")
+            conn.execute("ALTER TABLE services ADD COLUMN template_id TEXT NOT NULL DEFAULT ''")
+        if "template_data" not in cols:
+            conn.execute("ALTER TABLE services ADD COLUMN template_data TEXT DEFAULT ''")
+        if "template_date_updated" not in cols:
+            conn.execute("ALTER TABLE services ADD COLUMN template_date_updated TEXT DEFAULT ''")
     except Exception:
         pass
+
 
     # billing -> service_id, cycle_key
     try:
@@ -286,17 +339,19 @@ def create_service(
     description: str = "",
     send_cycle: str = "monthly",
     pf_id: str = "",
-    template_id: str = "local_default",
+    template_id: str = "",
 ):
     """새 서비스를 생성하고 ID를 반환한다."""
     init_db()
     now = _now()
     cycle = send_cycle if send_cycle in VALID_SEND_CYCLES else "monthly"
-    t_id = template_id or "local_default"
+    t_id = template_id or ""
     p_id = pf_id or ""
     with _connect() as conn:
         cur = conn.execute(
-            "INSERT INTO services (name, description, send_cycle, pf_id, template_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            """INSERT INTO services 
+            (name, description, send_cycle, pf_id, template_id, created_at, updated_at) 
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (name, description, cycle, p_id, t_id, now, now),
         )
         return cur.lastrowid
@@ -308,16 +363,19 @@ def update_service(
     description: str = "",
     send_cycle: str = "monthly",
     pf_id: str = "",
-    template_id: str = "local_default",
+    template_id: str = "",
 ) -> None:
     """서비스 이름/설명/발송주기/pfId/템플릿ID를 수정한다."""
     init_db()
     cycle = send_cycle if send_cycle in VALID_SEND_CYCLES else "monthly"
-    t_id = template_id or "local_default"
+    t_id = template_id or ""
     p_id = pf_id or ""
+
     with _connect() as conn:
         conn.execute(
-            "UPDATE services SET name = ?, description = ?, send_cycle = ?, pf_id = ?, template_id = ?, updated_at = ? WHERE id = ?",
+            """UPDATE services 
+            SET name = ?, description = ?, send_cycle = ?, pf_id = ?, template_id = ?, updated_at = ? 
+            WHERE id = ?""",
             (name, description, cycle, p_id, t_id, _now(), service_id),
         )
 
@@ -343,8 +401,121 @@ def get_service(service_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def save_service_template(service_id: int, template_data: dict) -> None:
+    """외래키(service_id)로 연결된 templates 테이블에 템플릿 정보를 저장(UPSERT)한다."""
+    init_db()
+    if not service_id or not template_data:
+        return
+
+    now = _now()
+    tid = str(template_data.get("templateId") or template_data.get("id") or "").strip()
+    name = str(template_data.get("name") or template_data.get("title") or tid).strip()
+    content = template_data.get("content") or ""
+
+    # 변수 목록
+    raw_vars = template_data.get("variables") or []
+    var_names = []
+    if isinstance(raw_vars, list):
+        for v in raw_vars:
+            if isinstance(v, dict) and v.get("name"):
+                var_names.append(str(v["name"]).strip())
+            elif isinstance(v, str):
+                var_names.append(v.strip())
+
+    buttons = template_data.get("buttons") or []
+    extra = template_data.get("extra") or ""
+    ad = template_data.get("ad") or ""
+    emphasize_type = template_data.get("emphasizeType") or template_data.get("emphasize_type") or ""
+    emphasize_title = template_data.get("emphasizeTitle") or template_data.get("emphasize_title") or ""
+    header = template_data.get("header") or ""
+    highlight = template_data.get("highlight") or {}
+    item = template_data.get("item") or {}
+    status = template_data.get("status") or ""
+    date_created = template_data.get("dateCreated") or template_data.get("date_created") or ""
+    date_updated = template_data.get("dateUpdated") or template_data.get("date_updated") or ""
+
+    with _connect() as conn:
+        conn.execute(
+            """INSERT INTO templates (
+                service_id, template_id, name, content, variables, buttons,
+                extra, ad, emphasize_type, emphasize_title, header, highlight,
+                item, status, date_created, date_updated, raw_data, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(service_id) DO UPDATE SET
+                template_id = excluded.template_id,
+                name = excluded.name,
+                content = excluded.content,
+                variables = excluded.variables,
+                buttons = excluded.buttons,
+                extra = excluded.extra,
+                ad = excluded.ad,
+                emphasize_type = excluded.emphasize_type,
+                emphasize_title = excluded.emphasize_title,
+                header = excluded.header,
+                highlight = excluded.highlight,
+                item = excluded.item,
+                status = excluded.status,
+                date_created = excluded.date_created,
+                date_updated = excluded.date_updated,
+                raw_data = excluded.raw_data,
+                updated_at = excluded.updated_at
+            """,
+            (
+                service_id,
+                tid,
+                name,
+                content,
+                json.dumps(var_names, ensure_ascii=False),
+                json.dumps(buttons, ensure_ascii=False),
+                extra,
+                ad,
+                emphasize_type,
+                emphasize_title,
+                header,
+                json.dumps(highlight, ensure_ascii=False) if isinstance(highlight, dict) else str(highlight),
+                json.dumps(item, ensure_ascii=False) if isinstance(item, dict) else str(item),
+                status,
+                date_created,
+                date_updated,
+                json.dumps(template_data, ensure_ascii=False),
+                now,
+                now,
+            ),
+        )
+
+
+def get_service_template(service_id: int) -> dict | None:
+    """외래키(service_id)로 저장된 템플릿 정보를 조회한다."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM templates WHERE service_id = ?",
+            (service_id,),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["variables"] = json.loads(d.get("variables") or "[]")
+        except Exception:
+            d["variables"] = []
+        try:
+            d["buttons"] = json.loads(d.get("buttons") or "[]")
+        except Exception:
+            d["buttons"] = []
+        try:
+            d["highlight"] = json.loads(d.get("highlight") or "{}")
+        except Exception:
+            d["highlight"] = {}
+        try:
+            d["item"] = json.loads(d.get("item") or "{}")
+        except Exception:
+            d["item"] = {}
+        return d
+
+
 def delete_service(service_id: int) -> None:
-    """서비스 및 연결된 헤더/매핑/billing/send_log를 모두 삭제한다."""
+    """서비스 및 연결된 템플릿/헤더/매핑/billing/send_log를 모두 삭제한다."""
     init_db()
     with _connect() as conn:
         conn.execute(
@@ -354,7 +525,9 @@ def delete_service(service_id: int) -> None:
         conn.execute("DELETE FROM billing WHERE service_id = ?", (service_id,))
         conn.execute("DELETE FROM excel_headers WHERE service_id = ?", (service_id,))
         conn.execute("DELETE FROM template_mapping WHERE service_id = ?", (service_id,))
+        conn.execute("DELETE FROM templates WHERE service_id = ?", (service_id,))
         conn.execute("DELETE FROM services WHERE id = ?", (service_id,))
+
 
 
 # ---------------------------------------------------------------------------
@@ -522,21 +695,22 @@ def save_send_batch(
         cycle_key, _ = compute_cycle_key(date_str, send_cycle)
 
     with _connect() as conn:
-        for row, tvars, result in zip(rows, template_vars_list, results):
+        for row in rows:
+            result = next(result for result in results if result.to == row.unit)
             cur = conn.execute(
                 """INSERT INTO billing
-                   (service_id, cycle_key, year, month, unit, tenant_name, phone, amount_on_time, amount_late, template_vars, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   (service_id, cycle_key, year, month, unit, tenant_name, phone, template_vars, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (service_id, cycle_key, year, month, row.unit, row.tenant_name, row.phone,
-                 row.amount_on_time, row.amount_late, json.dumps(tvars, ensure_ascii=False), _now()),
+                 "", _now()),
             )
             billing_id = cur.lastrowid
             conn.execute(
                 """INSERT INTO send_log
                    (billing_id, message_id, group_id, to_phone, status_code, status_label, status_message, processed_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (billing_id, result.message_id, result.group_id, result.to,
-                 result.status_code, _status_label(result.status_code), result.status_message,
+                (billing_id, result.message_id, result.group_id, row.phone,
+                 result.status_code, result.status_message, result.status_message,
                  result.date_processed, _now()),
             )
 
@@ -569,7 +743,7 @@ def update_send_status(results: list[SendResult]) -> None:
                 """UPDATE send_log
                    SET status_code = ?, status_label = ?, status_message = ?, processed_at = ?, updated_at = ?
                    WHERE message_id = ?""",
-                (result.status_code, _status_label(result.status_code), result.status_message,
+                (result.status_code, result.status, result.status_message,
                  result.date_processed, _now(), result.message_id),
             )
 
@@ -595,28 +769,26 @@ def get_summary(
             params.append(cycle_key)
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
-
         rows = conn.execute(
-            f"""SELECT b.unit, b.tenant_name, b.phone, b.cycle_key, s.status_label, s.status_message, s.processed_at
+            f"""SELECT b.unit, b.tenant_name, b.phone, b.cycle_key, s.status_code, s.status_label, s.status_message, s.processed_at
                 FROM send_log s JOIN billing b ON b.id = s.billing_id
                 {where}
                 ORDER BY s.id DESC""",
             tuple(params),
         ).fetchall()
 
-    status_label_kr = {"success": "완료", "pending": "대기", "failed": "실패"}
     result_rows = []
     counts = {"success": 0, "pending": 0, "failed": 0}
     for r in rows:
-        label = r["status_label"] or "pending"
-        counts[label] = counts.get(label, 0) + 1
+        status = _normalize_status(r["status_code"] or "1")
+        counts[status] = counts.get(status, 0) + 1
         result_rows.append({
             "unit": r["unit"],
             "tenantName": r["tenant_name"],
             "phone": r["phone"],
             "cycleKey": r["cycle_key"],
-            "status": label,
-            "statusLabel": status_label_kr.get(label, label),
+            "status": status,
+            "statusLabel": r["status_label"],
             "processedAt": r["processed_at"],
         })
 
@@ -627,3 +799,19 @@ def get_summary(
         "failed": counts["failed"],
         "rows": result_rows,
     }
+def _normalize_status(status_code: str) -> str:
+    """
+    1xxx	접수 중 오류
+    2000	정상 접수
+    2xxx	플랫폼 내부 처리 중 오류
+    3000	이통사로 접수 완료(정상)
+    3xxx	통신사에서 처리 중 오류
+    4000	발송 처리를 완료함
+    """
+    status_code_int = int(status_code)
+    if status_code_int % 1000 != 0:
+        return "failed"
+    elif 3000 >= status_code_int:
+        return "pending"
+    else:
+        return "success"

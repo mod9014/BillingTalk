@@ -1,20 +1,14 @@
 """
-로컬 설정 파일(~/.officetel-bill/config.json) 로드/저장.
 
 주의:
   - solapi_key, solapi_secret은 절대 소스코드에 하드코딩하지 않는다.
-  - 이 파일은 사용자 홈 디렉토리에 저장되며 저장소에는 포함되지 않는다 (.gitignore 참고).
 """
-
-from pathlib import Path
-import json
 
 from app.services import storage
 
 DEFAULT_CONFIG = {
     "solapi_key": "",
-    "solapi_secret": "",
-    "sender_phone": "",
+    "solapi_secret": ""
 }
 
 
