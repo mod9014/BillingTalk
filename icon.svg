@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+    <defs>
+        <!-- 배경 그라디언트 -->
+        <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#1E293B" />
+            <stop offset="100%" stop-color="#0F172A" />
+        </linearGradient>
+
+        <!-- 카카오 옐로우 포인트 그라디언트 -->
+        <linearGradient id="kakao-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FEE500" />
+            <stop offset="100%" stop-color="#FACC15" />
+        </linearGradient>
+
+        <!-- 고지서 종이 그라디언트 -->
+        <linearGradient id="paper-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#FFFFFF" />
+            <stop offset="100%" stop-color="#F1F5F9" />
+        </linearGradient>
+    </defs>
+
+    <!-- 베이스 배경 (둥근 사각형) -->
+    <rect width="512" height="512" rx="112" fill="url(#bg-grad)" />
+
+    <!-- 배경 건물 (오피스텔 실루엣) -->
+    <path d="M120 180 H260 V412 H120 Z" fill="#334155" rx="6" />
+    <!-- 건물 창문들 -->
+    <rect x="148" y="210" width="28" height="24" rx="4" fill="#64748B" />
+    <rect x="204" y="210" width="28" height="24" rx="4" fill="#64748B" />
+    <rect x="148" y="254" width="28" height="24" rx="4" fill="#64748B" />
+    <rect x="204" y="254" width="28" height="24" rx="4" fill="#FEE500" opacity="0.9" /> <!-- 불 켜진 방
+    포인트 -->
+    <rect x="148" y="298" width="28" height="24" rx="4" fill="#64748B" />
+    <rect x="204" y="298" width="28" height="24" rx="4" fill="#64748B" />
+    <rect x="148" y="342" width="28" height="24" rx="4" fill="#64748B" />
+    <rect x="204" y="342" width="28" height="24" rx="4" fill="#64748B" />
+
+    <!-- 전면: 스마트폰 / 고지서 카드 베이스 -->
+    <g filter="drop-shadow(0 12px 24px rgba(0,0,0,0.4))">
+        <rect x="210" y="120" width="200" height="292" rx="20" fill="url(#paper-grad)" />
+
+        <!-- 카드 상단 바 -->
+        <path
+            d="M210 140 C210 128.954 218.954 120 230 120 H390 C401.046 120 410 128.954 410 140 V160 H210 Z"
+            fill="#E2E8F0" />
+
+        <!-- 영수증/고지서 텍스트 라인 -->
+        <rect x="240" y="185" width="80" height="12" rx="6" fill="#0EA5E9" />
+        <rect x="240" y="215" width="140" height="10" rx="5" fill="#94A3B8" />
+        <rect x="240" y="235" width="110" height="10" rx="5" fill="#CBD5E1" />
+        <rect x="240" y="255" width="130" height="10" rx="5" fill="#CBD5E1" />
+
+        <!-- 구분선 -->
+        <line x1="240" y1="285" x2="380" y2="285" stroke="#CBD5E1" stroke-width="2"
+            stroke-dasharray="4 4" />
+
+        <!-- 총 청구 금액 강조 영역 -->
+        <rect x="240" y="305" width="50" height="10" rx="5" fill="#64748B" />
+        <rect x="310" y="300" width="70" height="18" rx="6" fill="#0284C7" />
+    </g>
+
+    <!-- 카카오톡 알림톡 말풍선 뱃지 -->
+    <g transform="translate(320, 310)" filter="drop-shadow(0 8px 16px rgba(0,0,0,0.3))">
+        <path
+            d="M60 0 C26.863 0 0 21.49 0 48 C0 64.627 11.238 79.167 28.513 87.727 L22.4 110.4 C21.895 112.275 24.032 113.738 25.568 112.564 L52.484 92.016 C54.945 92.271 57.447 92.4 60 92.4 C93.137 92.4 120 70.91 120 44.4 C120 21.49 93.137 0 60 0 Z"
+            fill="url(#kakao-grad)" />
+
+        <!-- 말풍선 내부 체크/전송 아이콘 -->
+        <path d="M42 46 L54 58 L78 34" fill="none" stroke="#1E293B" stroke-width="8"
+            stroke-linecap="round" stroke-linejoin="round" />
+    </g>
+</svg>
