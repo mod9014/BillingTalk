@@ -107,7 +107,7 @@ def init_db() -> None:
                 year INTEGER NOT NULL,
                 month INTEGER NOT NULL,
                 unit TEXT NOT NULL,
-                tenant_name TEXT NOT NULL,
+                send_date TEXT NOT NULL,
                 phone TEXT NOT NULL,
                 template_vars TEXT NOT NULL,
                 created_at TEXT NOT NULL
@@ -651,7 +651,7 @@ def check_duplicates(
     with _connect() as conn:
         # 해당 주기에 이미 등록된 billing 행 목록
         rows = conn.execute(
-            """SELECT b.unit, b.phone, b.tenant_name, s.status_label
+            """SELECT b.unit, b.phone, b.send_date, s.status_label
                FROM billing b
                LEFT JOIN send_log s ON s.billing_id = b.id
                WHERE b.service_id = ? AND b.cycle_key = ?""",
@@ -678,7 +678,6 @@ def check_duplicates(
 
 def save_send_batch(
     rows: list[BillingRow],
-    template_vars_list: list[dict],
     results: list[SendResult],
     year: int,
     month: int,
@@ -695,14 +694,19 @@ def save_send_batch(
         cycle_key, _ = compute_cycle_key(date_str, send_cycle)
 
     with _connect() as conn:
-        for row in rows:
-            result = next(result for result in results if result.to == row.unit)
+        for i, row in enumerate(rows):
+            result = results[i] if i < len(results) else SendResult(message_id=None, group_id=None, to=row.phone)
+            template_vars_str = (
+                json.dumps(row.data, ensure_ascii=False)
+                if isinstance(row.data, (dict, list))
+                else str(row.data or "{}")
+            )
             cur = conn.execute(
                 """INSERT INTO billing
-                   (service_id, cycle_key, year, month, unit, tenant_name, phone, template_vars, created_at)
+                   (service_id, cycle_key, year, month, unit, send_date, phone, template_vars, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (service_id, cycle_key, year, month, row.unit, row.tenant_name, row.phone,
-                 "", _now()),
+                (service_id, cycle_key, year, month, row.unit, row.send_date, row.phone,
+                 template_vars_str, _now()),
             )
             billing_id = cur.lastrowid
             conn.execute(
@@ -723,29 +727,38 @@ def get_pending_group_ids(service_id: int | None = None) -> list[str]:
             rows = conn.execute(
                 """SELECT DISTINCT s.group_id FROM send_log s
                    JOIN billing b ON b.id = s.billing_id
-                   WHERE s.status_label = 'pending' AND s.group_id IS NOT NULL AND b.service_id = ?""",
+                   WHERE s.status_code IN ('1000','2000','3000') AND s.group_id IS NOT NULL AND b.service_id = ?""",
                 (service_id,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT DISTINCT group_id FROM send_log WHERE status_label = 'pending' AND group_id IS NOT NULL"
+                "SELECT DISTINCT group_id FROM send_log WHERE status_code IN ('1000','2000','3000') AND group_id IS NOT NULL"
             ).fetchall()
         return [r["group_id"] for r in rows]
 
 
 def update_send_status(results: list[SendResult]) -> None:
-    """폴링(GET /status)으로 받아온 최신 상태를 message_id 기준으로 반영."""
+    """폴링(GET /status)으로 받아온 최신 상태를 message_id 기준으로 반영.(message_id 가 없으면 group_id 기준)"""
     if not results:
         return
     with _connect() as conn:
         for result in results:
-            conn.execute(
-                """UPDATE send_log
-                   SET status_code = ?, status_label = ?, status_message = ?, processed_at = ?, updated_at = ?
-                   WHERE message_id = ?""",
-                (result.status_code, result.status, result.status_message,
-                 result.date_processed, _now(), result.message_id),
-            )
+            if result.message_id != "":
+                conn.execute(
+                    """UPDATE send_log
+                    SET status_code = ?, status_label = ?, status_message = ?, processed_at = ?, updated_at = ?
+                    WHERE message_id = ?""",
+                    (result.status_code, result.status, result.status_message,
+                    result.date_processed, _now(), result.message_id),
+                )
+            else:
+                conn.execute(
+                    """UPDATE send_log
+                    SET status_code = ?, status_label = ?, status_message = ?, processed_at = ?, updated_at = ?
+                    WHERE group_id = ?""",
+                    (result.status_code, result.status, result.status_message,
+                    result.date_processed, _now(), result.group_id),
+                )
 
 
 def get_summary(
@@ -770,7 +783,8 @@ def get_summary(
 
         where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
         rows = conn.execute(
-            f"""SELECT b.unit, b.tenant_name, b.phone, b.cycle_key, s.status_code, s.status_label, s.status_message, s.processed_at
+            f"""SELECT b.unit, b.send_date, b.phone, b.cycle_key, s.group_id,
+                       s.status_code, s.status_label, s.status_message, s.processed_at
                 FROM send_log s JOIN billing b ON b.id = s.billing_id
                 {where}
                 ORDER BY s.id DESC""",
@@ -784,11 +798,13 @@ def get_summary(
         counts[status] = counts.get(status, 0) + 1
         result_rows.append({
             "unit": r["unit"],
-            "tenantName": r["tenant_name"],
+            "sendDate": r["send_date"],
             "phone": r["phone"],
             "cycleKey": r["cycle_key"],
+            "groupId": r["group_id"],
             "status": status,
             "statusLabel": r["status_label"],
+            "statusMessage": r["status_message"],
             "processedAt": r["processed_at"],
         })
 

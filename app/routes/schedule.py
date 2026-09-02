@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from app.models import BillingRow
 from app.routes.upload import get_draft_rows
 from app.services import excel_parser, formula_evaluator, storage, template_service
-from app.services.solapi_client import SolapiError, send_reserved
+from app.services.solapi_client import SolapiError, cancel_reserved, send_reserved
 
 router = APIRouter()
 
@@ -28,11 +28,13 @@ class DuplicateCheckPayload(BaseModel):
 
 class SchedulePayload(BaseModel):
     scheduled_date: str  # "YYYY-MM-DD"
-    scheduled_time: Optional[str] = None  # "HH:MM"
-    service_id: Optional[int] = 0
+    scheduled_time: str = "09:00"  # "HH:MM"
+    service_id: int
     cycle_key: Optional[str] = None
     force: Optional[bool] = False  # 중복 경고 후 사용자가 강제 등록을 승인한 경우
-    rows: Optional[list[list[str]]] = None  # 테이블에서 직접 편집/수정된 데이터가 전달될 경우 사용
+    headers: Optional[list[str]] = None 
+    header_vars: list[str]
+    rows: list[list[str]]
 
 
 def _extract_units_from_draft(raw_rows: list[list[str]], mapping: dict[str, str]) -> list[str]:
@@ -102,6 +104,8 @@ async def register_schedule(payload: SchedulePayload):
 
     # 2D 배열 형태의 raw_rows를 파싱하여 BillingRow 객체 및 템플릿 변수 생성
     mapping = storage.get_template_mapping(service_id)
+    mapping_meta = storage.get_mapping_meta(service_id)
+
     headers = [str(h).strip() for h in raw_rows[0]]
 
     # 발송 예정 시간 (payload 우선, 없으면 mapping 설정값, 기본 09:00)
@@ -115,7 +119,7 @@ async def register_schedule(payload: SchedulePayload):
         mm = "00"
     else:
         hh, mm = "09", "00"
-    scheduled_str = target_date.strftime(f"%Y-%m-%d {hh}:{mm}:00")
+    scheduled_str = target_date.strftime(f"%Y-%m-%dT{hh}:{mm}:00+09:00")
 
     # 발송 주기 키 결정 (프론트엔드 명시 cycle_key 우선)
     svc = storage.get_service(service_id)
@@ -126,66 +130,66 @@ async def register_schedule(payload: SchedulePayload):
     else:
         cycle_key, cycle_label = storage.compute_cycle_key(payload.scheduled_date, send_cycle)
 
-    # 템플릿 정보 및 매핑 로드
-    template_id = svc.get("template_id", "") if svc else ""
-    template_info = template_service.load_template_info(template_id, config)
-    template_vars = template_info.get("variables", [])
-
-    mapping = storage.get_template_mapping(service_id)
-    mapping_meta = storage.get_mapping_meta(service_id)
-
+    unit_var = ["호실", "호수", "호실번호","호"]
+    requared_header = ["send_date","send_time","phone", "unit"]
+    
     # 유효 행 변환
     billing_rows = []
-    template_vars_list = []
+    for row in payload.rows:
+        row_dict_by_var: dict[str, str] = {}
+        requared_val: dict[str, str] = {}
+        for var_name, val in zip(payload.header_vars, row):
+            if var_name in requared_header:
+                requared_val[var_name] = val
+                continue
+            if var_name.startswith("#{") and var_name.endswith("}"):
+                row_dict_by_var[var_name] = val
+            else:
+                row_dict_by_var["#{"+var_name+"}"] = val
 
-    for r in raw_rows[1:]:
-        row_dict = {headers[i]: (r[i] if i < len(r) else "") for i in range(len(headers))}
+        if not requared_val.get("unit"):
+            for var in unit_var:
+                if "#{"+var+"}" in row_dict_by_var:
+                    requared_val["unit"] = row_dict_by_var["#{"+var+"}"]
+                    break
+        send_date_val = str(requared_val.get("send_date") or "").strip()
+        send_time_val = str(requared_val.get("send_time") or mapping.get("send_time", "09:00") or "09:00").strip()
 
-        # 1. 수신 연락처 동적 평가 (phone 매핑 수식 적용)
-        phone_expr = mapping.get("phone", "{연락처}")
-        phone_val = formula_evaluator.evaluate_expression(
-            expr=phone_expr,
-            row_dict=row_dict,
-            config=config,
-            year=year,
-            month=month,
-            field_type="phone",
-        )
+        # send_date가 비어있으면 payload.scheduled_date 사용
+        if not send_date_val or send_date_val == "":
+            send_date_val = payload.scheduled_date[:10]
 
-        # 2. 식별자 (unit, tenant_name) 유연 추출
-        unit_expr = mapping.get("호실", "{호실}")
-        unit_val = formula_evaluator.evaluate_expression(
-            expr=unit_expr, row_dict=row_dict, config=config, year=year, month=month
-        ) or str(row_dict.get("호실", "") or (r[0] if len(r) > 0 else "")).strip()
+        # 날짜 정규화: YYYY-MM-DD 형식 맞추기
+        try:
+            sd = datetime.strptime(send_date_val[:10], "%Y-%m-%d")
+            send_date_str = sd.strftime("%Y-%m-%d")
+        except ValueError:
+            send_date_str = payload.scheduled_date[:10]
 
-        tenant_key = next((k for k, v in mapping_meta.items() if v.get("type") == "name"))
-        tenant_expr = mapping.get(tenant_key, "{입주자명}")
-        tenant_val = formula_evaluator.evaluate_expression(
-            expr=tenant_expr, row_dict=row_dict, config=config, year=year, month=month
-        )
+        # 시간 정규화: HH:MM
+        if ":" in send_time_val:
+            parts = send_time_val.split(":")
+            t_hh = parts[0].strip().zfill(2)
+            t_mm = parts[1].strip().zfill(2)
+        elif send_time_val.isdigit():
+            t_hh = send_time_val.zfill(2)
+            t_mm = "00"
+        else:
+            t_hh, t_mm = "09", "00"
 
-        tvars = excel_parser.evaluate_row_template_vars(
-            row_dict=row_dict,
-            mapping=mapping,
-            mapping_meta=mapping_meta,
-            config=config,
-            year=year,
-            month=month,
-            template_vars=template_vars,
-        )
+        send_date = f"{send_date_str}T{t_hh}:{t_mm}:00+09:00"
+
 
         billing_row = BillingRow(
-            phone=str(phone_val),
-            unit=str(unit_val),
-            tenant_name=str(tenant_val),
-            valid=bool(phone_val),
-            data=row_dict,
+            phone=str(requared_val.get("phone")),
+            unit=str(requared_val.get("unit")),
+            send_date=str(send_date),
+            valid=bool(requared_val.get("phone")),
+            data=row_dict_by_var,
         )
         billing_rows.append(billing_row)
-        template_vars_list.append(tvars)
 
     valid_rows = [r for r in billing_rows if r.valid]
-    valid_tvars = [t for r, t in zip(billing_rows, template_vars_list) if r.valid]
 
     if not valid_rows:
         return JSONResponse(
@@ -201,24 +205,49 @@ async def register_schedule(payload: SchedulePayload):
         if svc.get("template_id"):
             send_config["template_id"] = svc["template_id"]
 
+    # send_date + send_time 기준으로 그룹화하여 각 그룹을 별도 예약 발송
+    from collections import defaultdict
+    groups: dict[str, list] = defaultdict(list)
+    for row in valid_rows:
+        groups[row.send_date].append(row)
+
+    all_results: list = []
+    first_scheduled_str = scheduled_str
     try:
-        results = send_reserved(valid_rows, valid_tvars, scheduled_str, send_config)
+        for group_scheduled_str, group_rows in groups.items():
+            grp_scheduled_str = group_scheduled_str
+            if first_scheduled_str == scheduled_str:
+                first_scheduled_str = grp_scheduled_str
+
+            grp_results = send_reserved(group_rows, grp_scheduled_str, send_config)
+            all_results.extend(grp_results)
+
+            storage.save_send_batch(
+                rows=group_rows,
+                results=grp_results,
+                year=year,
+                month=month,
+                service_id=service_id,
+                cycle_key=cycle_key,
+            )
     except SolapiError as e:
         return JSONResponse(status_code=502, content={"error": str(e)})
 
-    storage.save_send_batch(
-        rows=valid_rows,
-        template_vars_list=valid_tvars,
-        results=results,
-        year=year,
-        month=month,
-        service_id=service_id,
-        cycle_key=cycle_key,
-    )
-
     return {
-        "registeredCount": len(results),
-        "scheduledDate": scheduled_str,
+        "registeredCount": len(all_results),
+        "scheduledDate": first_scheduled_str,
+        "groupCount": len(groups),
         "cycleKey": cycle_key,
         "cycleLabel": cycle_label,
     }
+
+@router.post("/cancel-schedule")
+async def cancel_schedule(group_ids: list[str]):
+    config = storage.get_app_config()
+    all_results: list = []
+    for group_id in group_ids:
+        result = cancel_reserved(group_id, config)
+        all_results.append(result)
+    storage.update_send_status(all_results)
+    return True
+    

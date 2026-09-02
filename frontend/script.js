@@ -584,7 +584,16 @@ function startInlineCellEdit(td, rowIdx, colIdx) {
 }
 
 function finishInlineCellEdit(td, rowIdx, colIdx, newVal) {
-  const trimmed = String(newVal ?? "").trim();
+  // const trimmed = String(newVal ?? "").trim();
+  let trimmed = String(newVal ?? "").trim();
+
+  // 메타데이터 타입이 금액(amount)이면 천 단위 구분 기호 검증 및 포맷팅 자동 적용
+  const varName = mappedDataState.headerVars?.[colIdx] || "";
+  const varMeta = mappedDataState.mappingMeta?.[varName] || {};
+  if (varMeta.type === "amount" && trimmed !== "") {
+    trimmed = _fmtAmountClient(trimmed);
+  }
+
   mappedDataState.rows[rowIdx][colIdx] = trimmed;
 
   const origVal = String(mappedDataState.originalRows[rowIdx]?.[colIdx] ?? "").trim();
@@ -700,18 +709,8 @@ function evaluateFormulaClient(expr, rowObj, fieldType = "text") {
         }
       }
     } catch (e) {
-      // 무시
+      throw new Error(`수식 평가 오류 (${expr}): ${e.message}`);
     }
-  }
-
-  // 3. 텍스트 치환
-  if (evaluated === null) {
-    evaluated = formula.replace(/\{([^}]+)\}/g, (_, h) => {
-      const k = h.trim();
-      if (k === "청구년") return String(curYear);
-      if (k === "청구월") return String(curMonth);
-      return rowObj[k] !== undefined ? String(rowObj[k]) : "";
-    });
   }
 
   // 4. 날짜 필드 정규화
@@ -772,10 +771,6 @@ function recalculateMultiColumnFormulas(changedRowIdx, changedColIdx) {
         }
       }
     });
-
-    const now = selectedCycleDate || new Date();
-    obj["청구년"] = String(now.getFullYear());
-    obj["청구월"] = String(now.getMonth() + 1);
 
     return obj;
   };
@@ -1071,7 +1066,7 @@ function initScheduleButton() {
         }
       }
 
-      // 2. 예약 발송 등록 실행
+      // 2. 예약 발송 등록 실행 (발송자 정보 테이블에서 수정된 최신 데이터 전송)
       resultEl.textContent = "예약 발송 등록 중...";
       const res = await fetch("/schedule", {
         method: "POST",
@@ -1082,6 +1077,9 @@ function initScheduleButton() {
           service_id: currentServiceId || 0,
           cycle_key: currentCycleInfo.key,
           force: true,
+          headers: mappedDataState.headers || [],
+          header_vars: mappedDataState.headerVars || [],
+          rows: mappedDataState.rows || [],
         }),
       });
       const result = await readJson(res);
@@ -1153,18 +1151,75 @@ function renderStatusPage() {
   const startIdx = (currentPage - 1) * pageSize;
   const pageRows = allRows.slice(startIdx, startIdx + pageSize);
 
-  pageRows.forEach((row) => {
+  function dateFormat(dateString) {
+    if (!dateString) return "-";
+    const date = new Date(dateString);
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
+  }
+
+  pageRows.forEach((row, relIdx) => {
+    const isPending = row.status === "pending";
+    const groupId = row.groupId || "";
     const tr = document.createElement("tr");
+    if (isPending) tr.dataset.groupId = groupId;
     tr.innerHTML = `
+      <td style="text-align:center;">
+        ${isPending
+        ? `<input type="checkbox" class="row-check-pending" data-group-id="${groupId}" title="예약 취소 선택">`
+        : `<span style="color:var(--text-muted); font-size:0.8rem;">-</span>`}
+      </td>
       <td>${row.unit ?? ""}</td>
-      <td>${row.tenantName ?? ""}</td>
       <td>${row.phone ?? ""}</td>
       <td><span class="badge ${statusBadge[row.status] ?? "badge-invalid"}">${statusCodeKR[row.status] ?? row.status}</span></td>
-      <td>${row.statusLabel ?? "-"}</td>
+      <td>${row.statusMessage ?? "-"}</td>
+      <td>${dateFormat(row.sendDate) ?? ""}</td>
       <td>${row.processedAt ?? "-"}</td>
     `;
     tbody.appendChild(tr);
   });
+
+  // 체크박스 상태에 따라 취소 버튼 표시/업데이트
+  function updateCancelButton() {
+    const checked = [...document.querySelectorAll(".row-check-pending:checked")];
+    const btn = $("#btn-cancel-selected");
+    const countEl = $("#cancel-selected-count");
+    if (!btn) return;
+    if (checked.length > 0) {
+      btn.disabled = false;
+      if (countEl) {
+        countEl.style.display = "";
+        countEl.textContent = `${checked.length}건 선택됨`;
+      }
+    } else {
+      btn.disabled = true;
+      if (countEl) countEl.style.display = "none";
+    }
+  }
+
+  // 개별 체크박스 change 이벤트
+  tbody.querySelectorAll(".row-check-pending").forEach((cb) => {
+    cb.addEventListener("change", updateCancelButton);
+  });
+
+  // 전체 선택(헤더 체크박스) — 대기 중 행만 토글
+  const checkAll = $("#check-all-pending");
+  if (checkAll) {
+    checkAll.checked = false;
+    checkAll.removeEventListener("change", checkAll._handler);
+    checkAll._handler = () => {
+      const all = [...document.querySelectorAll(".row-check-pending")];
+      all.forEach((cb) => { cb.checked = checkAll.checked; });
+      updateCancelButton();
+    };
+    checkAll.addEventListener("change", checkAll._handler);
+  }
+
+  updateCancelButton();
 
   toggleEmptyState(tbody, emptyEl);
 
@@ -1253,6 +1308,7 @@ function initStatusPolling() {
   const filterCurrentBtn = $("#filter-current-cycle-btn");
   const filterAllBtn = $("#filter-all-cycle-btn");
   const pageSizeSelect = $("#status-page-size");
+  const cancelBtn = $("#btn-cancel-selected");
 
   if (refreshBtn) refreshBtn.addEventListener("click", fetchStatus);
 
@@ -1279,6 +1335,48 @@ function initStatusPolling() {
       filterAllBtn.classList.add("active");
       filterCurrentBtn.classList.remove("active");
       fetchStatus();
+    });
+  }
+
+  // 예약 취소 버튼
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", async () => {
+      const checked = [...document.querySelectorAll(".row-check-pending:checked")];
+      if (checked.length === 0) return;
+
+      // group_id별로 중복 제거 (같은 그룹의 여러 행이 선택될 수 있음)
+      const groupIds = [...new Set(
+        checked.map((cb) => cb.dataset.groupId).filter(Boolean)
+      )];
+
+      if (groupIds.length === 0) {
+        alert("취소할 수 있는 대기 중 예약이 없습니다.");
+        return;
+      }
+
+      if (!confirm(`선택한 ${checked.length}건(${groupIds.length}개 그룹)의 예약을 취소하시겠습니까?`)) return;
+
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = "취소 중...";
+      try {
+        const res = await fetch("/cancel-schedule", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(groupIds),
+        });
+        if (res.ok) {
+          await fetchStatus();
+          alert(`${groupIds.length}건 예약이 취소되었습니다.`);
+        } else {
+          const data = await readJson(res);
+          alert(`취소 실패: ${data.error || "알 수 없는 오류"}`);
+        }
+      } catch (err) {
+        alert(`서버와 통신할 수 없습니다: ${err.message}`);
+      } finally {
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = "🚫 예약 취소";
+      }
     });
   }
 

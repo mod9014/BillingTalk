@@ -69,6 +69,49 @@ def mask_name(name: str) -> str:
     # 4글자 이상: 첫글자 + 가운데 전부 * + 마지막 글자
     return name[0] + "*" * (n - 2) + name[-1]
 
+def fmtPhoneNumber(phone: str) -> str:
+    """
+    전화번호 자동 포맷팅: 010, 011, 016, 017, 018, 019 + 3~4자리 + 4자리
+
+    - 010-1234-5678
+    - 01012345678
+    - 010 1234 5678
+    - 011-123-4567
+    - 031-1234-5678
+    - 02-123-4567
+
+    규칙:
+    1. 숫자만 남김 (공백, -, ., 등 제거)
+    2. 11자리: 010-xxxx-xxxx
+    3. 10자리: 011/016/017/018/019-xxx-xxxx 또는 010-xxx-xxxx
+    4. 9자리: 02-xxx-xxxx 또는 031-xxx-xxxx 등
+    5. 8자리: xxxx-xxxx
+    6. 그 외: 원본 그대로 반환
+    """
+    if not phone:
+        return ""
+    s = str(phone).strip()
+    # 숫자만 남김
+    s = re.sub(r"[^\d]", "", s)
+    n = len(s)
+    if n == 11:
+        if s.startswith("010"):
+            return f"{s[:3]}-{s[3:7]}-{s[7:]}"
+        return f"{s[:3]}-{s[3:6]}-{s[6:]}"
+    if n == 10:
+        if s.startswith("010"):
+            return f"{s[:3]}-{s[3:6]}-{s[6:]}"
+        if s.startswith("02"):
+            return f"{s[:2]}-{s[2:6]}-{s[6:]}"
+        return f"{s[:3]}-{s[3:5]}-{s[5:]}"
+    if n == 9:
+        if s.startswith("02"):
+            return f"{s[:2]}-{s[2:5]}-{s[5:]}"
+        return f"{s[:3]}-{s[3:5]}-{s[5:]}"
+    if n == 8:
+        return f"{s[:4]}-{s[4:]}"
+    return ""
+
 
 def _parse_date(val: Any, year: int, month: int) -> Optional[date]:
     """다양한 형식의 날짜 문자열/숫자를 date 객체로 파싱."""
@@ -208,5 +251,7 @@ def evaluate_expression(
         evaluated = format_amount(evaluated)
     elif evaluated and field_type == "name":
         evaluated = mask_name(evaluated)
+    elif evaluated and field_type == "phone":
+        evaluated = fmtPhoneNumber(evaluated)
 
     return evaluated

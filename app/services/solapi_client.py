@@ -59,23 +59,23 @@ def _require_config(config: dict) -> None:
 
 def send_reserved(
     rows: list[BillingRow],
-    template_vars_list: list[dict],
     scheduled_date: str,
     config: dict,
+    is_test: bool = False,
 ) -> list[SendResult]:
     """알림톡 예약발송 등록. scheduled_date: 'YYYY-MM-DD HH:MM:SS' 형식.
     disableSms=False로 알림톡 실패 시 SMS 자동 대체발송 유지."""
     _require_config(config)
 
     messages = []
-    for row, tvars in zip(rows, template_vars_list):
+    for row in rows:
         messages.append({
             "to": row.phone,
             "from": config.get("sender_phone") or config["solapi_sender"],
             "kakaoOptions": {
                 "pfId": config["solapi_sender"],
                 "templateId": config["template_id"],
-                "variables": tvars,
+                "variables": row.data,
                 "disableSms": False,
             },
             "customFields": {"unit": row.unit},
@@ -87,6 +87,9 @@ def send_reserved(
         "showMessageList": True,
         "allowDuplicates": False,
     }
+
+    if is_test:
+        raise Exception("테스트 발송입니다." + str(payload))
 
     headers = _auth_header(config["solapi_key"], config["solapi_secret"])
 
@@ -116,6 +119,29 @@ def send_reserved(
 
     return results
 
+def cancel_reserved(group_id: str, config: dict):
+    _require_config(config)
+    headers = _auth_header(config["solapi_key"], config["solapi_secret"])
+    try:
+        resp = requests.delete(f"{BASE_URL}/messages/v4/groups/{group_id}/schedule", headers=headers, timeout=TIMEOUT_SEC)
+    except requests.RequestException as e:
+        raise SolapiError(f"Solapi 요청 실패: {e}") from e
+    
+    if resp.status_code >= 400:
+        raise SolapiError(f"Solapi 오류 응답 ({resp.status_code}): {resp.text}")
+
+    body = resp.json()
+    group_id = (body.get("groupInfo") or {}).get("groupId") or body.get("groupId")
+
+    return SendResult(
+                message_id="",
+                group_id=group_id,
+                to="",
+                status_code="1070",
+                status=body.get("status"),
+                status_message=body.get("log")[-1].get("message"),
+                date_processed=body.get("dateProcessed"),
+            )
 
 def get_status(group_id: str, config: dict) -> list[SendResult]:
     """폴링용 상태 조회. group_id에 속한 메시지들의 최신 상태를 가져온다."""

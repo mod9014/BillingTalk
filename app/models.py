@@ -13,7 +13,7 @@ from typing import Optional
 class BillingRow:
     phone: str
     unit: str = ""
-    tenant_name: str = ""
+    send_date: str = ""
     valid: bool = True
     errors: "list[str]" = field(default_factory=list)
     data: "dict" = field(default_factory=dict)
@@ -22,7 +22,7 @@ class BillingRow:
         return {
             "phone": self.phone,
             "unit": self.unit,
-            "tenant_name": self.tenant_name,
+            "send_date": self.send_date,
             "valid": self.valid,
             "errors": self.errors,
             "data": self.data,

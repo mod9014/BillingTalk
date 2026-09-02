@@ -142,17 +142,25 @@
             <div class="label">실패</div>
           </div>
         </div>
-
+        <div class="table-toolbar">
+          <button id="btn-cancel-selected" class="btn btn-sm"
+            style="background-color: rgba(192, 51, 0, 0.8); color: white;" title="선택한 대기 중 건의 예약을 취소합니다">
+            🚫 예약 취소
+          </button>
+          <span id="cancel-selected-count" style="display:none; font-size:0.85rem; color: var(--text-muted);"></span>
+        </div>
         <div class="table-wrap">
+
           <table id="status-table">
             <thead>
               <tr>
+                <th style="width:36px;"><input type="checkbox" id="check-all-pending" title="대기 중 전체 선택"></th>
                 <th>호실</th>
-                <th>입주자명</th>
                 <th>연락처</th>
                 <th>상태</th>
                 <th>설명</th>
-                <th>처리 일시</th>
+                <th>예약일</th>
+                <th>완료일</th>
               </tr>
             </thead>
             <tbody id="status-table-body">
@@ -164,7 +172,8 @@
         <!-- 발송 상태 페이지네이션 컨트롤 -->
         <div class="pagination-container" id="status-pagination" style="display: none;">
           <div class="pagination-info" id="status-pagination-info">
-            총 <strong id="status-pagination-total">0</strong>건 (<span id="status-pagination-page-current">1</span> / <span id="status-pagination-page-total">1</span> 페이지)
+            총 <strong id="status-pagination-total">0</strong>건 (<span id="status-pagination-page-current">1</span> /
+            <span id="status-pagination-page-total">1</span> 페이지)
           </div>
           <div class="pagination-controls">
             <div class="pagination-pages" id="status-pagination-pages"></div>

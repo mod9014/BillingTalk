@@ -187,7 +187,7 @@ async def get_service(service_id: int):
 
     # dateUpdated 비교
     template_changed = False
-    if saved_date_updated and current_date_updated and saved_date_updated != current_date_updated:
+    if saved_date_updated and current_date_updated and saved_date_updated >= current_date_updated:
         template_changed = True
 
     return {
