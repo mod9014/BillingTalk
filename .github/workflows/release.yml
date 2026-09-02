@@ -8,11 +8,45 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+        include:
+          - build_mode: onefile
+            pyinstaller_flag: --onefile
+            artifact_name: BillingTalk.exe
+          - build_mode: onedir
+            pyinstaller_flag: --onedir
+            artifact_name: BillingTalk-dir
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build (${{ matrix.build_mode }})
+        run: |
+          pyinstaller -y ${{ matrix.pyinstaller_flag }} --windowed `
+            --name BillingTalk `
+            --icon icon.ico `
+            --add-data "frontend;frontend" `
+            --add-data "icon.png;." `
+            main.py
+
+      - name: Package onedir as ZIP
+        if: matrix.build_mode == 'onedir'
+        run: Compress-Archive -Path dist\BillingTalk -DestinationPath dist\BillingTalk-dir.zip
+
+      - name: Upload onefile EXE
+        if: matrix.build_mode == 'onefile'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BillingTalk.exe
+
+      - name: Upload onedir ZIP
+        if: matrix.build_mode == 'onedir'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/BillingTalk-dir.zip
