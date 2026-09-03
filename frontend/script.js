@@ -50,6 +50,26 @@ function getUrlParam(key) {
   return new URLSearchParams(window.location.search).get(key);
 }
 
+/**
+ * API 키 오류 배너 표시/숨김
+ * 에러 메시지에 "API 키" 또는 "재설정" 키워드가 있으면 배너를 표시합니다.
+ */
+function showApiKeyErrorBannerIfNeeded(errorMsg) {
+  const banner = $("#api-key-error-banner");
+  if (!banner) return;
+  if (errorMsg && (errorMsg.includes("API 키") || errorMsg.includes("재설정") || errorMsg.includes("API Key") || errorMsg.includes("API Secret"))) {
+    const desc = $("#api-key-error-desc");
+    if (desc) desc.textContent = errorMsg;
+    banner.style.display = "";
+    banner.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+}
+
+function hideApiKeyErrorBanner() {
+  const banner = $("#api-key-error-banner");
+  if (banner) banner.style.display = "none";
+}
+
 // 클라이언트 측 주기 계산 (표시 및 키 산출용)
 function computeClientCycle(dateObj, cycle) {
   const dt = dateObj instanceof Date ? dateObj : new Date();
@@ -1084,10 +1104,13 @@ function initScheduleButton() {
       });
       const result = await readJson(res);
       if (!res.ok) {
-        resultEl.textContent = `등록 실패: ${result.error || "알 수 없는 오류"}`;
+        const errMsg = result.error || "알 수 없는 오류";
+        resultEl.textContent = `등록 실패: ${errMsg}`;
+        showApiKeyErrorBannerIfNeeded(errMsg);
         return;
       }
-      resultEl.textContent = `✓ ${result.registeredCount}건 예약 등록 완료 [${result.cycleLabel}] (발송 예정: ${result.scheduledDate})`;
+      hideApiKeyErrorBanner();
+      resultEl.textContent = `✓ ${result.registeredCount}건 예약 등록 완료 [${result.cycleLabel}]`;
       fetchStatus();
     } catch (err) {
       resultEl.textContent = `서버와 통신할 수 없습니다: ${err.message}`;
@@ -1193,7 +1216,8 @@ function renderStatusPage() {
       btn.disabled = false;
       if (countEl) {
         countEl.style.display = "";
-        countEl.textContent = `${checked.length}건 선택됨`;
+        const groupCount = new Set(checked.map((c) => c.dataset.groupId).filter(Boolean)).size;
+        countEl.textContent = `${checked.length}건 (${groupCount}개 그룹) 선택됨`;
       }
     } else {
       btn.disabled = true;
@@ -1201,9 +1225,29 @@ function renderStatusPage() {
     }
   }
 
-  // 개별 체크박스 change 이벤트
+  // 개별 체크박스 change 이벤트 (동일 groupId는 함께 체크/해제)
   tbody.querySelectorAll(".row-check-pending").forEach((cb) => {
-    cb.addEventListener("change", updateCancelButton);
+    cb.addEventListener("change", () => {
+      const gid = cb.dataset.groupId;
+      if (gid) {
+        tbody.querySelectorAll(`.row-check-pending[data-group-id="${gid}"]`).forEach((otherCb) => {
+          otherCb.checked = cb.checked;
+        });
+      }
+      updateCancelButton();
+    });
+  });
+
+  // 동일 groupId 행 hover 시 시각적 하이라이트
+  tbody.querySelectorAll("tr").forEach((tr) => {
+    const gid = tr.dataset.groupId;
+    if (!gid) return;
+    tr.addEventListener("mouseenter", () => {
+      tbody.querySelectorAll(`tr[data-group-id="${gid}"]`).forEach((r) => r.classList.add("group-highlight"));
+    });
+    tr.addEventListener("mouseleave", () => {
+      tbody.querySelectorAll(`tr[data-group-id="${gid}"]`).forEach((r) => r.classList.remove("group-highlight"));
+    });
   });
 
   // 전체 선택(헤더 체크박스) — 대기 중 행만 토글
@@ -1354,7 +1398,22 @@ function initStatusPolling() {
         return;
       }
 
-      if (!confirm(`선택한 ${checked.length}건(${groupIds.length}개 그룹)의 예약을 취소하시겠습니까?`)) return;
+      // 전체 상태 목록에서 해당 group_id에 속한 모든 대기 건 추출
+      const allAffected = (statusPaginationState.allRows || []).filter(
+        (r) => r.status === "pending" && groupIds.includes(r.groupId)
+      );
+      const affectedUnits = allAffected.map((r) => r.unit).filter(Boolean);
+      const unitSummary = affectedUnits.length > 0
+        ? (affectedUnits.slice(0, 6).join(", ") + (affectedUnits.length > 6 ? ` 외 ${affectedUnits.length - 6}건` : ""))
+        : "";
+
+      const confirmMsg =
+        `선택한 예약 취소를 진행하시겠습니까?\n\n` +
+        `• 취소 대상: ${allAffected.length}건 (${groupIds.length}개 발송 그룹)\n` +
+        (unitSummary ? `• 포함 호실: ${unitSummary}\n\n` : "\n") +
+        `※ 동일한 발송 일시로 묶인 그룹 단위로 일괄 취소 처리됩니다.`;
+
+      if (!confirm(confirmMsg)) return;
 
       cancelBtn.disabled = true;
       cancelBtn.textContent = "취소 중...";
@@ -1366,7 +1425,7 @@ function initStatusPolling() {
         });
         if (res.ok) {
           await fetchStatus();
-          alert(`${groupIds.length}건 예약이 취소되었습니다.`);
+          alert(`총 ${allAffected.length}건(${groupIds.length}개 그룹)의 예약이 취소되었습니다.`);
         } else {
           const data = await readJson(res);
           alert(`취소 실패: ${data.error || "알 수 없는 오류"}`);

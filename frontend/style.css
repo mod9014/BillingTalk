@@ -369,6 +369,12 @@ textarea:focus {
   margin-bottom: 8px;
 }
 
+/* 동일 예약 그룹(groupId) 행 호버 하이라이트 */
+#status-table tbody tr.group-highlight {
+  background-color: rgba(37, 99, 235, 0.09) !important;
+  transition: background-color 0.15s ease;
+}
+
 .form-actions {
   display: flex;
   gap: 8px;

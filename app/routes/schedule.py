@@ -244,10 +244,22 @@ async def register_schedule(payload: SchedulePayload):
 @router.post("/cancel-schedule")
 async def cancel_schedule(group_ids: list[str]):
     config = storage.get_app_config()
+    if not group_ids:
+        return {"ok": True, "cancelled_count": 0}
+
     all_results: list = []
-    for group_id in group_ids:
-        result = cancel_reserved(group_id, config)
-        all_results.append(result)
-    storage.update_send_status(all_results)
-    return True
+    try:
+        for group_id in group_ids:
+            if not group_id:
+                continue
+            result = cancel_reserved(group_id, config)
+            all_results.append(result)
+        if all_results:
+            storage.update_send_status(all_results)
+    except SolapiError as e:
+        return JSONResponse(status_code=502, content={"error": str(e)})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": f"예약 취소 처리 중 오류: {e}"})
+
+    return {"ok": True, "cancelled_count": len(all_results)}
     

@@ -78,6 +78,25 @@
     </div>
 
 
+    <!-- API 키 오류 안내 배너 -->
+    <div class="template-status-warning-banner" id="api-key-error-banner" style="display: none; border-left-color: #e53935; background: linear-gradient(135deg, rgba(229,57,53,0.08) 0%, rgba(229,57,53,0.03) 100%);">
+      <div class="warning-banner-left">
+        <span class="warning-banner-icon">🔑</span>
+        <div class="warning-banner-content">
+          <div class="warning-banner-title">
+            <strong>Solapi API 키 오류</strong>
+            <span class="badge badge-invalid">인증 실패</span>
+          </div>
+          <p class="warning-banner-desc" id="api-key-error-desc">
+            API 키가 올바르지 않거나 만료되었습니다. 시스템 설정 페이지에서 Solapi API Key와 API Secret을 재설정해주세요.
+          </p>
+        </div>
+      </div>
+      <div class="warning-banner-action">
+        <a href="setup.html" class="btn btn-sm" style="background: #e53935; color: #fff; border: none;">⚙ 시스템 설정 바로가기</a>
+      </div>
+    </div>
+
     <!-- 서비스가 선택되지 않았을 때의 안내 오버레이용 컨테이너 -->
     <div id="service-dependent-content">
 

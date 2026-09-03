@@ -201,6 +201,17 @@ def get_solapi_template(template_id: str, config: dict) -> dict | None:
         resp = requests.get(url, headers=headers, timeout=TIMEOUT_SEC)
         if resp.status_code == 200:
             return resp.json()
+        elif resp.status_code == 400:
+            err_msg = resp.text
+            try:
+                err_data = resp.json()
+                err_msg = err_data.get("errorMessage") or err_data.get("message") or resp.text
+            except Exception:
+                pass
+            raise SolapiError(
+                f"Solapi API 인증/요청 오류 ({resp.status_code}: {err_msg}). "
+                f"API 키가 올바르지 않거나 만료되었을 수 있습니다. 웹 [시스템 설정] 페이지에서 Solapi API Key와 API Secret을 재설정해주세요."
+            )
         elif resp.status_code != 404:
             # v1 엔드포인트 fallback 시도
             fallback_url = f"{BASE_URL}/kakao/v1/templates/{template_id}"

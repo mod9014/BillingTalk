@@ -8,7 +8,8 @@ from app.services import storage
 
 DEFAULT_CONFIG = {
     "solapi_key": "",
-    "solapi_secret": ""
+    "solapi_secret": "",
+    "sender_phone": "",
 }
 
 

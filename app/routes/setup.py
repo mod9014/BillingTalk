@@ -19,6 +19,7 @@ router = APIRouter()
 class SetupPayload(BaseModel):
     solapi_key: Optional[str] = ""
     solapi_secret: Optional[str] = ""
+    sender_phone: Optional[str] = ""
 
 
 @router.post("/setup")
@@ -34,6 +35,7 @@ async def get_setup_status():
 
     return {
         "configured": is_configured(config),
+        "sender_phone": config.get("sender_phone") or "",
         # solapi_key / solapi_secret은 절대 프론트로 내려보내지 않는다.
     }
 

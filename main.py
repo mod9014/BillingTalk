@@ -52,7 +52,7 @@ def quit_app(icon, item):
 
 def run_server(app, port: int):
     global server
-    config = uvicorn.Config(app, host=HOST, port=port, log_config=None)
+    config = uvicorn.Config(app, host=HOST, port=port)# , log_config=None
     server = uvicorn.Server(config)
     server.run()
 def resource_path(relative_path: str) -> Path:
