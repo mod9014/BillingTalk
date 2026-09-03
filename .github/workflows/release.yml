@@ -42,6 +42,8 @@ jobs:
             --icon icon.ico `
             --add-data "frontend;frontend" `
             --add-data "icon.png;." `
+            --collect-all uvicorn `
+            --hidden-import multipart `
             main.py
 
       - name: Package onedir as ZIP

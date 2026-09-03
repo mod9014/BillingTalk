@@ -9,6 +9,7 @@ FastAPI 앱 팩토리.
 주의: CORS 등 미들웨어는 로컬 전용이라 불필요 — 넣지 않는다.
 """
 
+import sys
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -19,7 +20,11 @@ from app.config import is_configured
 from app.routes import schedule, service, setup, status, upload
 from app.services import storage
 
-FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+if getattr(sys, "frozen", False):
+    FRONTEND_DIR = Path(sys._MEIPASS) / "frontend"
+else:
+    FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+
 
 
 def create_app(config: dict | None = None) -> FastAPI:
